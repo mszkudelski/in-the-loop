@@ -6,7 +6,7 @@ interface StatusBadgeProps {
 
 export function StatusBadge({ status }: StatusBadgeProps) {
   const icons: Record<Item['status'], string> = {
-    waiting: '⏳',
+    waiting: '⏸️',
     in_progress: '⏳',
     updated: '✅',
     completed: '✔️',

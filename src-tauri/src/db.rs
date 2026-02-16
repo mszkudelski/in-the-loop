@@ -143,19 +143,23 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let now = chrono::Utc::now().to_rfc3339();
         
+        // First, get the current status to save as previous_status
+        let mut stmt = conn.prepare("SELECT status FROM items WHERE id = ?1")?;
+        let current_status: String = stmt.query_row([id], |row| row.get(0))?;
+        
         if let Some(meta) = metadata {
             conn.execute(
-                "UPDATE items SET status = ?1, previous_status = status, 
-                 last_checked_at = ?2, last_updated_at = ?2, metadata = ?3
-                 WHERE id = ?4",
-                params![status, now, meta, id],
+                "UPDATE items SET status = ?1, previous_status = ?2, 
+                 last_checked_at = ?3, last_updated_at = ?3, metadata = ?4
+                 WHERE id = ?5",
+                params![status, current_status, now, meta, id],
             )?;
         } else {
             conn.execute(
-                "UPDATE items SET status = ?1, previous_status = status,
-                 last_checked_at = ?2, last_updated_at = ?2
-                 WHERE id = ?3",
-                params![status, now, id],
+                "UPDATE items SET status = ?1, previous_status = ?2,
+                 last_checked_at = ?3, last_updated_at = ?3
+                 WHERE id = ?4",
+                params![status, current_status, now, id],
             )?;
         }
         Ok(())
