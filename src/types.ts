@@ -3,14 +3,16 @@ export type ItemType =
   | 'github_action' 
   | 'github_pr' 
   | 'copilot_agent' 
-  | 'cli_session';
+  | 'cli_session'
+  | 'opencode_session';
 
 export type ItemStatus = 
   | 'waiting' 
   | 'in_progress' 
   | 'updated' 
   | 'completed' 
-  | 'failed';
+  | 'failed'
+  | 'archived';
 
 export interface Item {
   id: string;
@@ -30,6 +32,8 @@ export interface Item {
 export interface Credentials {
   slack_token?: string;
   github_token?: string;
+  opencode_url?: string;
+  opencode_password?: string;
 }
 
 export interface Settings {

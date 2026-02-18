@@ -42,6 +42,12 @@ export function Dashboard() {
     ? items 
     : items.filter(item => item.type === filter);
 
+  const sortedItems = [...filteredItems].sort((a, b) => {
+    if (a.status === 'archived' && b.status !== 'archived') return 1;
+    if (a.status !== 'archived' && b.status === 'archived') return -1;
+    return 0;
+  });
+
   const typeCounts = {
     all: items.length,
     slack_thread: items.filter(i => i.type === 'slack_thread').length,
@@ -49,16 +55,17 @@ export function Dashboard() {
     github_pr: items.filter(i => i.type === 'github_pr').length,
     copilot_agent: items.filter(i => i.type === 'copilot_agent').length,
     cli_session: items.filter(i => i.type === 'cli_session').length,
+    opencode_session: items.filter(i => i.type === 'opencode_session').length,
   };
 
   return (
     <div className="container">
-      <h1>In The Loop</h1>
-      <p style={{ color: '#999', marginBottom: '24px' }}>
+      <h1 className="page-title">In The Loop</h1>
+      <p className="page-subtitle">
         Track your async work items in one place
       </p>
 
-      <div style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between' }}>
+      <div className="toolbar">
         <button onClick={() => setShowSettings(!showSettings)}>
           {showSettings ? 'Hide Settings' : 'Show Settings'}
         </button>
@@ -69,77 +76,59 @@ export function Dashboard() {
 
       <AddItemForm onItemAdded={loadItems} />
 
-      <div style={{ marginBottom: '16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+      <div className="filter-row">
         <button 
           onClick={() => setFilter('all')}
-          style={{ 
-            borderColor: filter === 'all' ? '#646cff' : 'transparent',
-            opacity: filter === 'all' ? 1 : 0.7
-          }}
+          className={`filter-chip ${filter === 'all' ? 'active' : ''}`}
         >
           All ({typeCounts.all})
         </button>
         <button 
           onClick={() => setFilter('slack_thread')}
-          style={{ 
-            borderColor: filter === 'slack_thread' ? '#646cff' : 'transparent',
-            opacity: filter === 'slack_thread' ? 1 : 0.7
-          }}
+          className={`filter-chip ${filter === 'slack_thread' ? 'active' : ''}`}
         >
-          💬 Slack ({typeCounts.slack_thread})
+          Slack ({typeCounts.slack_thread})
         </button>
         <button 
           onClick={() => setFilter('github_action')}
-          style={{ 
-            borderColor: filter === 'github_action' ? '#646cff' : 'transparent',
-            opacity: filter === 'github_action' ? 1 : 0.7
-          }}
+          className={`filter-chip ${filter === 'github_action' ? 'active' : ''}`}
         >
-          ⚙️ Actions ({typeCounts.github_action})
+          Actions ({typeCounts.github_action})
         </button>
         <button 
           onClick={() => setFilter('github_pr')}
-          style={{ 
-            borderColor: filter === 'github_pr' ? '#646cff' : 'transparent',
-            opacity: filter === 'github_pr' ? 1 : 0.7
-          }}
+          className={`filter-chip ${filter === 'github_pr' ? 'active' : ''}`}
         >
-          🔀 PRs ({typeCounts.github_pr})
+          PRs ({typeCounts.github_pr})
         </button>
         <button 
           onClick={() => setFilter('copilot_agent')}
-          style={{ 
-            borderColor: filter === 'copilot_agent' ? '#646cff' : 'transparent',
-            opacity: filter === 'copilot_agent' ? 1 : 0.7
-          }}
+          className={`filter-chip ${filter === 'copilot_agent' ? 'active' : ''}`}
         >
-          🤖 Copilot ({typeCounts.copilot_agent})
+          Copilot ({typeCounts.copilot_agent})
         </button>
         <button 
           onClick={() => setFilter('cli_session')}
-          style={{ 
-            borderColor: filter === 'cli_session' ? '#646cff' : 'transparent',
-            opacity: filter === 'cli_session' ? 1 : 0.7
-          }}
+          className={`filter-chip ${filter === 'cli_session' ? 'active' : ''}`}
         >
-          💻 CLI ({typeCounts.cli_session})
+          CLI ({typeCounts.cli_session})
+        </button>
+        <button 
+          onClick={() => setFilter('opencode_session')}
+          className={`filter-chip ${filter === 'opencode_session' ? 'active' : ''}`}
+        >
+          OpenCode ({typeCounts.opencode_session})
         </button>
       </div>
 
-      {filteredItems.length === 0 ? (
-        <div style={{ 
-          padding: '40px', 
-          textAlign: 'center', 
-          color: '#999',
-          border: '2px dashed #333',
-          borderRadius: '8px'
-        }}>
+      {sortedItems.length === 0 ? (
+        <div className="empty-state">
           {items.length === 0 
             ? 'No items tracked yet. Add a URL above to get started!' 
             : 'No items in this category'}
         </div>
       ) : (
-        filteredItems.map(item => (
+        sortedItems.map(item => (
           <ItemCard key={item.id} item={item} onRemove={handleRemove} />
         ))
       )}

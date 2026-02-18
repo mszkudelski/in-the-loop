@@ -25,6 +25,8 @@ pub struct Item {
 pub struct Credentials {
     pub slack_token: Option<String>,
     pub github_token: Option<String>,
+    pub opencode_url: Option<String>,
+    pub opencode_password: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,6 +164,55 @@ impl Database {
                 params![status, current_status, now, id],
             )?;
         }
+        Ok(())
+    }
+
+    pub fn touch_item_check(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE items SET last_checked_at = ?1 WHERE id = ?2",
+            params![now, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_item_poll_error(&self, id: &str, error: &str, mark_failed: bool) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+
+        let mut stmt = conn.prepare("SELECT status, metadata FROM items WHERE id = ?1")?;
+        let (current_status, metadata_str): (String, String) =
+            stmt.query_row([id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+
+        let mut metadata_value = serde_json::from_str::<serde_json::Value>(&metadata_str)
+            .unwrap_or_else(|_| serde_json::json!({}));
+
+        if !metadata_value.is_object() {
+            metadata_value = serde_json::json!({});
+        }
+
+        if let Some(map) = metadata_value.as_object_mut() {
+            map.insert("last_error".to_string(), serde_json::json!(error));
+            map.insert("last_error_at".to_string(), serde_json::json!(now));
+        }
+
+        let new_metadata = serde_json::to_string(&metadata_value)?;
+
+        if mark_failed && current_status != "failed" {
+            conn.execute(
+                "UPDATE items SET status = 'failed', previous_status = ?1,
+                 last_checked_at = ?2, last_updated_at = ?2, metadata = ?3
+                 WHERE id = ?4",
+                params![current_status, now, new_metadata, id],
+            )?;
+        } else {
+            conn.execute(
+                "UPDATE items SET last_checked_at = ?1, metadata = ?2 WHERE id = ?3",
+                params![now, new_metadata, id],
+            )?;
+        }
+
         Ok(())
     }
 

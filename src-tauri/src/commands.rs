@@ -69,6 +69,22 @@ pub async fn save_credentials(
         }
     }
 
+    if let Some(opencode_url) = credentials.opencode_url {
+        if !opencode_url.is_empty() {
+            state
+                .db
+                .save_credential("opencode_url", &opencode_url)
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    if let Some(opencode_password) = credentials.opencode_password {
+        state
+            .db
+            .save_credential("opencode_password", &opencode_password)
+            .map_err(|e| e.to_string())?;
+    }
+
     Ok(())
 }
 

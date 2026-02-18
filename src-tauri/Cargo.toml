@@ -27,6 +27,8 @@ anyhow = "1"
 thiserror = "2"
 regex = "1"
 urlencoding = "2"
+url = "2"
+base64 = "0.22"
 axum = "0.7"
 tower = "0.5"
 

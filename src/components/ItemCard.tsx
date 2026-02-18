@@ -8,20 +8,13 @@ interface ItemCardProps {
 }
 
 export function ItemCard({ item, onRemove }: ItemCardProps) {
-  const typeIcons: Record<Item['type'], string> = {
-    slack_thread: '💬',
-    github_action: '⚙️',
-    github_pr: '🔀',
-    copilot_agent: '🤖',
-    cli_session: '💻',
-  };
-
   const typeName: Record<Item['type'], string> = {
     slack_thread: 'Slack',
     github_action: 'GitHub Action',
     github_pr: 'PR',
     copilot_agent: 'Copilot Agent',
     cli_session: 'CLI Session',
+    opencode_session: 'OpenCode',
   };
 
   const handleOpen = () => {
@@ -45,23 +38,39 @@ export function ItemCard({ item, onRemove }: ItemCardProps) {
     return date.toLocaleString();
   };
 
+  const formatEpochMs = (epochMs?: number) => {
+    if (!epochMs) return null;
+    const date = new Date(epochMs);
+    return date.toLocaleString();
+  };
+
+  const lastLlmResponse = item.type === 'opencode_session'
+    ? formatEpochMs(item.metadata?.last_activity)
+    : null;
+
   return (
     <div className="item-card">
       <div className="item-header">
         <span className="type-badge">
-          {typeIcons[item.type]} {typeName[item.type]}
+          {typeName[item.type]}
         </span>
-        <h3 className="item-title">{item.title}</h3>
+        {item.url ? (
+          <button className="item-title-link" onClick={handleOpen}>
+            {item.title}
+          </button>
+        ) : (
+          <h3 className="item-title">{item.title}</h3>
+        )}
         <StatusBadge status={item.status} />
       </div>
-      <div style={{ textAlign: 'left', fontSize: '0.875rem', color: '#999' }}>
-        Last checked: {formatDate(item.last_checked_at)}
+      <div className="item-meta">
+        {lastLlmResponse && (
+          <div>Last LLM response: {lastLlmResponse}</div>
+        )}
+        <div>Last checked: {formatDate(item.last_checked_at)}</div>
       </div>
       <div className="item-actions">
-        {item.url && (
-          <button onClick={handleOpen}>Open →</button>
-        )}
-        <button onClick={handleRemove}>🗑️ Remove</button>
+        <button className="btn-ghost" onClick={handleRemove}>Remove</button>
       </div>
     </div>
   );

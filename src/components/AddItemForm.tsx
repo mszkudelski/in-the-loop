@@ -33,7 +33,7 @@ export function AddItemForm({ onItemAdded }: AddItemFormProps) {
 
   return (
     <div className="add-form">
-      <h2>Add Item to Track</h2>
+      <h2>Add item</h2>
       <form onSubmit={handleSubmit}>
         <input
           type="text"
@@ -51,7 +51,7 @@ export function AddItemForm({ onItemAdded }: AddItemFormProps) {
           onChange={(e) => setCustomTitle(e.target.value)}
         />
         {error && (
-          <div style={{ color: '#ef4444', marginBottom: '12px' }}>
+          <div className="form-error">
             {error}
           </div>
         )}

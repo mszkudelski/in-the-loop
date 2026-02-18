@@ -5,6 +5,8 @@ import { Credentials, Settings as SettingsType } from '../types';
 export function Settings() {
   const [slackToken, setSlackToken] = useState('');
   const [githubToken, setGithubToken] = useState('');
+  const [opencodeUrl, setOpencodeUrl] = useState('');
+  const [opencodePassword, setOpencodePassword] = useState('');
   const [pollingInterval, setPollingInterval] = useState(30);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -32,6 +34,8 @@ export function Settings() {
       const credentials: Credentials = {};
       if (slackToken) credentials.slack_token = slackToken;
       if (githubToken) credentials.github_token = githubToken;
+      if (opencodeUrl) credentials.opencode_url = opencodeUrl;
+      if (opencodePassword) credentials.opencode_password = opencodePassword;
       
       await invoke('save_credentials', { credentials });
       
@@ -44,6 +48,8 @@ export function Settings() {
       // Clear token fields after save
       setSlackToken('');
       setGithubToken('');
+      setOpencodeUrl('');
+      setOpencodePassword('');
     } catch (error) {
       setMessage(`Error: ${error}`);
     } finally {
@@ -76,6 +82,30 @@ export function Settings() {
             placeholder="Enter new token or leave blank to keep existing"
             value={githubToken}
             onChange={(e) => setGithubToken(e.target.value)}
+          />
+        </div>
+
+        <div className="settings-field">
+          <label htmlFor="opencode-url">OpenCode URL</label>
+          <input
+            id="opencode-url"
+            type="text"
+            className="form-input"
+            placeholder="Paste any OpenCode URL from your browser"
+            value={opencodeUrl}
+            onChange={(e) => setOpencodeUrl(e.target.value)}
+          />
+        </div>
+
+        <div className="settings-field">
+          <label htmlFor="opencode-password">OpenCode Server Password</label>
+          <input
+            id="opencode-password"
+            type="password"
+            className="form-input"
+            placeholder="Leave blank if no password set"
+            value={opencodePassword}
+            onChange={(e) => setOpencodePassword(e.target.value)}
           />
         </div>
 
