@@ -2,7 +2,7 @@
 
 ## Commit Message Convention
 
-This project uses **Conventional Commits** to drive automated releases via [release-please](https://github.com/googleapis/release-please). Every commit message merged to `main` affects version bumps and changelog generation. Follow this format exactly.
+This project uses **Conventional Commits** to drive automated releases. Every commit message merged to `main` affects version bumps and release notes generation. Follow this format exactly.
 
 ### Format
 
@@ -70,8 +70,8 @@ fix(db): handle migration failure on corrupted database
 1. **Subject line**: imperative mood, lowercase, no period, max 72 chars
 2. **Body**: explain *what* and *why*, not *how*. Wrap at 80 chars.
 3. **One logical change per commit**. Don't mix a feature with a refactor.
-4. **No version bumps in commit messages**. Release-please handles versioning automatically.
-5. Commits with types `feat` and `fix` appear in the auto-generated CHANGELOG. Use other types for changes that don't need user-facing release notes.
+4. **No version bumps in commit messages**. The release workflow handles versioning automatically.
+5. Commits with types `feat` and `fix` trigger a release and appear in the auto-generated release notes. Use other types for changes that don't need user-facing release notes.
 
 ## Project Structure
 
@@ -80,20 +80,18 @@ in-the-loop/
 ├── src/                    # React frontend (TypeScript)
 ├── src-tauri/              # Rust backend (Tauri v2)
 │   ├── src/                # Rust source
-│   └── tauri.conf.json     # Tauri config (version synced by release-please)
+│   └── tauri.conf.json     # Tauri config
 ├── scripts/                # CLI wrapper
-├── .github/workflows/      # CI/CD
-├── release-please-config.json
-└── .release-please-manifest.json
+└── .github/workflows/      # CI/CD
 ```
 
 ## Release Process
 
 Automated via GitHub Actions on merge to `main`:
 
-1. `release-please` analyzes conventional commits and opens/updates a Release PR
-2. The Release PR bumps versions in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`
-3. When the Release PR is merged, a GitHub Release is created with a tag
+1. The workflow analyzes conventional commits since the last tag to determine the version bump (`feat` → minor, `fix` → patch)
+2. If a release is needed, it bumps versions in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`, and commits to `main`
+3. `gh release create` creates a GitHub Release with auto-generated notes (this also creates the git tag)
 4. The `build-tauri` job builds macOS installers (aarch64 + x86_64) and uploads `.dmg` files as release assets
 
 ## Tech Stack
@@ -101,4 +99,4 @@ Automated via GitHub Actions on merge to `main`:
 - **Frontend**: React 18, TypeScript, Vite
 - **Backend**: Rust, Tauri v2, SQLite (rusqlite), Axum
 - **Build**: `npm run tauri:build` → `.dmg` installer
-- **CI**: GitHub Actions, release-please, tauri-action
+- **CI**: GitHub Actions, tauri-action
