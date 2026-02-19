@@ -9,6 +9,7 @@ export type ItemType =
 export type ItemStatus = 
   | 'waiting' 
   | 'in_progress' 
+  | 'input_needed'
   | 'updated' 
   | 'approved'
   | 'merged'

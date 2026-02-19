@@ -270,6 +270,11 @@ button:focus-visible {
   color: #9dc4ff;
 }
 
+.status-input_needed {
+  background: #3d3520;
+  color: #f0d080;
+}
+
 .status-updated {
   background: #1c3d30;
   color: #8ed8aa;
@@ -463,6 +468,11 @@ button:focus-visible {
   .status-in_progress {
     background: #e5efff;
     color: #1d4ed8;
+  }
+
+  .status-input_needed {
+    background: #fef3c7;
+    color: #92400e;
   }
 
   .status-updated,
