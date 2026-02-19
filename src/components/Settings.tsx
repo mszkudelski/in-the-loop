@@ -8,6 +8,7 @@ export function Settings() {
   const [opencodeUrl, setOpencodeUrl] = useState('');
   const [opencodePassword, setOpencodePassword] = useState('');
   const [pollingInterval, setPollingInterval] = useState(30);
+  const [screenWidth, setScreenWidth] = useState(400);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -19,6 +20,7 @@ export function Settings() {
     try {
       const settings: SettingsType = await invoke('get_settings');
       setPollingInterval(settings.polling_interval);
+      setScreenWidth(settings.screen_width);
     } catch (error) {
       console.error('Failed to load settings:', error);
     }
@@ -38,7 +40,7 @@ export function Settings() {
       
       await invoke('save_credentials', { credentials });
       await invoke('save_settings', { 
-        settings: { polling_interval: pollingInterval } 
+        settings: { polling_interval: pollingInterval, screen_width: screenWidth } 
       });
       
       setMessage('Saved');
@@ -121,6 +123,27 @@ export function Settings() {
           <span>15s</span>
           <span>1min</span>
           <span>5min</span>
+        </div>
+      </div>
+
+      <div className="settings-field">
+        <label htmlFor="screen-width">
+          Screen Width: {screenWidth}px
+        </label>
+        <input
+          id="screen-width"
+          type="range"
+          min="300"
+          max="1200"
+          step="50"
+          value={screenWidth}
+          onChange={(e) => setScreenWidth(parseInt(e.target.value))}
+          style={{ width: '100%' }}
+        />
+        <div className="range-labels">
+          <span>300px</span>
+          <span>750px</span>
+          <span>1200px</span>
         </div>
       </div>
 
