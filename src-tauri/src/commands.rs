@@ -30,6 +30,7 @@ pub async fn add_item(
         created_at: chrono::Utc::now().to_rfc3339(),
         archived: false,
         polling_interval_override: None,
+        checked: false,
     };
 
     state.db.add_item(&item).map_err(|e| e.to_string())?;
@@ -44,6 +45,18 @@ pub async fn get_items(archived: bool, state: State<'_, AppState>) -> Result<Vec
 #[tauri::command]
 pub async fn remove_item(id: String, state: State<'_, AppState>) -> Result<(), String> {
     state.db.remove_item(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn toggle_checked(
+    id: String,
+    checked: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .db
+        .toggle_checked(&id, checked)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -104,6 +117,23 @@ pub async fn save_settings(
 #[tauri::command]
 pub async fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
     state.db.get_all_settings().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn save_setting(
+    key: String,
+    value: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .db
+        .save_setting(&key, &value)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_setting(key: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
+    state.db.get_setting(&key).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

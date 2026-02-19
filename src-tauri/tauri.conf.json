@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "In The Loop",
-        "width": 900,
-        "height": 700,
+        "width": 1100,
+        "height": 850,
         "resizable": true,
         "fullscreen": false,
         "visible": true,
@@ -23,7 +23,18 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "capabilities": [
+        {
+          "identifier": "default",
+          "windows": ["main"],
+          "permissions": [
+            "core:default",
+            "shell:allow-open",
+            "notification:default"
+          ]
+        }
+      ]
     },
     "trayIcon": {
       "id": "main-tray",

@@ -27,6 +27,7 @@ export interface Item {
   created_at: string;
   archived: boolean;
   polling_interval_override?: number;
+  checked: boolean;
 }
 
 export interface Credentials {

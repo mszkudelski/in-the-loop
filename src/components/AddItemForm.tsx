@@ -7,7 +7,6 @@ interface AddItemFormProps {
 
 export function AddItemForm({ onItemAdded }: AddItemFormProps) {
   const [url, setUrl] = useState('');
-  const [customTitle, setCustomTitle] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -17,12 +16,8 @@ export function AddItemForm({ onItemAdded }: AddItemFormProps) {
     setLoading(true);
 
     try {
-      await invoke('add_item', { 
-        url, 
-        customTitle: customTitle || undefined 
-      });
+      await invoke('add_item', { url, customTitle: undefined });
       setUrl('');
-      setCustomTitle('');
       onItemAdded();
     } catch (err) {
       setError(err as string);
@@ -32,33 +27,19 @@ export function AddItemForm({ onItemAdded }: AddItemFormProps) {
   };
 
   return (
-    <div className="add-form">
-      <h2>Add item</h2>
-      <form onSubmit={handleSubmit}>
-        <input
-          type="text"
-          className="form-input"
-          placeholder="Paste URL (Slack thread, GitHub Action, PR, etc.)"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          required
-        />
-        <input
-          type="text"
-          className="form-input"
-          placeholder="Custom title (optional)"
-          value={customTitle}
-          onChange={(e) => setCustomTitle(e.target.value)}
-        />
-        {error && (
-          <div className="form-error">
-            {error}
-          </div>
-        )}
-        <button type="submit" disabled={loading}>
-          {loading ? 'Adding...' : 'Add Item'}
-        </button>
-      </form>
-    </div>
+    <form className="add-form-inline" onSubmit={handleSubmit}>
+      <input
+        type="text"
+        className="form-input"
+        placeholder="Paste a URL to track (Slack, GitHub, OpenCode...)"
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+        required
+      />
+      <button type="submit" disabled={loading}>
+        {loading ? '...' : 'Add'}
+      </button>
+      {error && <span className="form-error-inline">{error}</span>}
+    </form>
   );
 }

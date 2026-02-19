@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
+use tauri_plugin_notification::NotificationExt;
 use tokio::time;
 
 pub struct PollingManager {
@@ -61,7 +62,7 @@ impl PollingManager {
                 "github_action" => Self::poll_github_action(db, &item).await,
                 "github_pr" => Self::poll_github_pr(db, &item).await,
                 "opencode_session" => {
-                    Self::poll_opencode_session(db, &item, &opencode_statuses).await
+                    Self::poll_opencode_session(db, &item, &opencode_statuses, app_handle).await
                 }
                 _ => continue,
             };
@@ -257,10 +258,16 @@ impl PollingManager {
             .flatten()
             .unwrap_or_default();
 
-        match opencode::get_session_statuses(&config.base_url, &password, None).await {
-            Ok(statuses) => Some((config.base_url, password, statuses)),
-            Err(_) => None,
+        // Fetch statuses from ALL directories so sessions across projects get correct status
+        let directories = opencode::enumerate_opencode_directories();
+        let mut all_statuses = HashMap::new();
+        for dir in &directories {
+            if let Ok(statuses) = opencode::get_session_statuses(&config.base_url, &password, Some(dir)).await {
+                all_statuses.extend(statuses);
+            }
         }
+
+        Some((config.base_url, password, all_statuses))
     }
 
     async fn discover_opencode_sessions(
@@ -280,77 +287,77 @@ impl PollingManager {
             return Ok(());
         }
 
-        let sessions = opencode::list_sessions(&config.base_url, &password, None).await?;
-        let statuses = opencode::get_session_statuses(&config.base_url, &password, None).await?;
+        let directories = opencode::enumerate_opencode_directories();
+        let existing_session_ids = db.get_opencode_session_ids()?;
 
-        let existing_items = db.get_items(false)?;
-        let existing_session_ids: Vec<String> = existing_items
-            .iter()
-            .filter(|i| i.item_type == "opencode_session")
-            .filter_map(|i| {
-                serde_json::from_str::<serde_json::Value>(&i.metadata)
-                    .ok()
-                    .and_then(|m| m["session_id"].as_str().map(|s| s.to_string()))
-            })
-            .collect();
+        for dir in &directories {
+            let sessions = match opencode::list_sessions(&config.base_url, &password, Some(dir)).await {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let statuses = opencode::get_session_statuses(&config.base_url, &password, Some(dir))
+                .await
+                .unwrap_or_default();
+            let web_url = opencode::build_web_url(&config.base_url, dir);
 
-        for session in &sessions {
-            if existing_session_ids.contains(&session.id) {
-                continue;
-            }
-
-            // Skip subagent sessions — only track top-level sessions
-            if session.parent_id.is_some() {
-                continue;
-            }
-
-            let status_str = if session.time.archived.is_some() {
-                "archived"
-            } else {
-                match statuses.get(&session.id) {
-                    Some(opencode::SessionStatus::Busy) => "in_progress",
-                    Some(opencode::SessionStatus::Retry { .. }) => "in_progress",
-                    // Idle or not in status map = waiting for user input = completed
-                    Some(opencode::SessionStatus::Idle) | None => "completed",
+            for session in &sessions {
+                if existing_session_ids.contains(&session.id) {
+                    continue;
                 }
-            };
 
-            let title = if session.title.is_empty() {
-                format!("OpenCode Session {}", &session.id[..8.min(session.id.len())])
-            } else {
-                session.title.clone()
-            };
+                if session.parent_id.is_some() {
+                    continue;
+                }
 
-            let metadata = serde_json::json!({
-                "session_id": session.id,
-                "opencode_url": config.base_url,
-                "session_status": match statuses.get(&session.id) {
-                    Some(opencode::SessionStatus::Idle) => "idle",
-                    Some(opencode::SessionStatus::Busy) => "busy",
-                    Some(opencode::SessionStatus::Retry { .. }) => "retry",
-                    None => "unknown",
-                },
-                "session_title": session.title,
-                "last_activity": session.time.updated,
-            });
+                let status_str = if session.time.archived.is_some() {
+                    "archived"
+                } else {
+                    match statuses.get(&session.id) {
+                        Some(opencode::SessionStatus::Busy) => "in_progress",
+                        Some(opencode::SessionStatus::Retry { .. }) => "in_progress",
+                        Some(opencode::SessionStatus::Idle) | None => "completed",
+                    }
+                };
 
-            let item = Item {
-                id: uuid::Uuid::new_v4().to_string(),
-                item_type: "opencode_session".to_string(),
-                title,
-                url: None,
-                status: status_str.to_string(),
-                previous_status: None,
-                metadata: serde_json::to_string(&metadata)?,
-                last_checked_at: None,
-                last_updated_at: None,
-                created_at: chrono::Utc::now().to_rfc3339(),
-                archived: false,
-                polling_interval_override: None,
-            };
+                let title = if session.title.is_empty() {
+                    format!("OpenCode Session {}", &session.id[..8.min(session.id.len())])
+                } else {
+                    session.title.clone()
+                };
 
-            db.add_item(&item)?;
-            let _ = app_handle.emit("item-updated", &item.id);
+                let metadata = serde_json::json!({
+                    "session_id": session.id,
+                    "opencode_url": web_url,
+                    "directory": dir,
+                    "session_status": match statuses.get(&session.id) {
+                        Some(opencode::SessionStatus::Idle) => "idle",
+                        Some(opencode::SessionStatus::Busy) => "busy",
+                        Some(opencode::SessionStatus::Retry { .. }) => "retry",
+                        None => "unknown",
+                    },
+                    "session_title": session.title,
+                    "last_activity": session.time.updated,
+                });
+
+                let item = Item {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    item_type: "opencode_session".to_string(),
+                    title,
+                    url: None,
+                    status: status_str.to_string(),
+                    previous_status: None,
+                    metadata: serde_json::to_string(&metadata)?,
+                    last_checked_at: None,
+                    last_updated_at: None,
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                    archived: false,
+                    polling_interval_override: None,
+                    checked: status_str == "archived",
+                };
+
+                db.add_item(&item)?;
+                let _ = app_handle.emit("item-updated", &item.id);
+            }
         }
 
         Ok(())
@@ -360,6 +367,7 @@ impl PollingManager {
         db: &Arc<Database>,
         item: &crate::db::Item,
         context: &Option<(String, String, HashMap<String, opencode::SessionStatus>)>,
+        app_handle: &AppHandle,
     ) -> anyhow::Result<()> {
         let (url, password, statuses) = match context {
             Some(ctx) => (&ctx.0, &ctx.1, &ctx.2),
@@ -373,6 +381,8 @@ impl PollingManager {
         let session_id = metadata["session_id"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing session_id in opencode_session metadata"))?;
+        let stored_dir = metadata["directory"].as_str().map(|s| s.to_string());
+        let resolved_dir = stored_dir.or_else(|| opencode::find_session_directory(session_id));
 
         let result =
             opencode::poll_opencode_session(url, password, session_id, statuses).await?;
@@ -382,7 +392,7 @@ impl PollingManager {
             .and_then(|v| v.as_str())
             .unwrap_or("unknown");
 
-        let sessions = opencode::list_sessions(url, password, None).await?;
+        let sessions = opencode::list_sessions(url, password, resolved_dir.as_deref()).await?;
         let is_archived = sessions
             .iter()
             .find(|s| s.id == session_id)
@@ -399,7 +409,13 @@ impl PollingManager {
         };
 
         let mut full_metadata = result;
-        full_metadata.insert("opencode_url".to_string(), serde_json::json!(url));
+        if let Some(ref dir) = resolved_dir {
+            let web_url = opencode::build_web_url(url, dir);
+            full_metadata.insert("opencode_url".to_string(), serde_json::json!(web_url));
+            full_metadata.insert("directory".to_string(), serde_json::json!(dir));
+        } else {
+            full_metadata.insert("opencode_url".to_string(), serde_json::json!(url));
+        }
         if let Some(title) = sessions
             .iter()
             .find(|s| s.id == session_id)
@@ -417,6 +433,35 @@ impl PollingManager {
 
         let new_metadata = serde_json::to_string(&full_metadata)?;
         db.update_item_status(&item.id, new_status, Some(&new_metadata))?;
+
+        if new_status != item.status {
+            let notification_body = match (item.status.as_str(), new_status) {
+                ("in_progress", "completed") => Some("Waiting for your input"),
+                (_, "archived") => Some("Session has been archived"),
+                ("completed", "in_progress") => Some("Agent started working"),
+                _ => None,
+            };
+
+            if let Some(body) = notification_body {
+                let _ = app_handle
+                    .notification()
+                    .builder()
+                    .title(&item.title)
+                    .body(body)
+                    .show();
+            }
+        }
+
+        if new_status == "archived" && item.status != "archived" {
+            db.toggle_checked(&item.id, true)?;
+        }
+
+        // Auto-uncheck when session becomes active again (completed/failed → waiting/in_progress)
+        if (item.status == "completed" || item.status == "failed")
+            && (new_status == "waiting" || new_status == "in_progress")
+        {
+            db.toggle_checked(&item.id, false)?;
+        }
 
         Ok(())
     }

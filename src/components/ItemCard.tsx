@@ -5,21 +5,57 @@ import { invoke } from '@tauri-apps/api/core';
 interface ItemCardProps {
   item: Item;
   onRemove: (id: string) => void;
+  onToggleChecked: (id: string, checked: boolean) => void;
 }
 
-export function ItemCard({ item, onRemove }: ItemCardProps) {
+function timeAgo(dateInput?: string | number): string {
+  if (!dateInput) return '';
+  const date = typeof dateInput === 'number' ? new Date(dateInput) : new Date(dateInput);
+  const now = Date.now();
+  const diffMs = now - date.getTime();
+  if (diffMs < 0) return 'just now';
+
+  const seconds = Math.floor(diffMs / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return date.toLocaleDateString();
+}
+
+function getOpenCodeSessionUrl(item: Item): string | null {
+  if (item.type !== 'opencode_session') return null;
+  const baseUrl = item.metadata?.opencode_url;
+  const sessionId = item.metadata?.session_id;
+  if (!baseUrl || !sessionId) return null;
+  return `${baseUrl}/session/${sessionId}`;
+}
+
+function getLastActivity(item: Item): string | number | undefined {
+  if (item.type === 'opencode_session' && item.metadata?.last_activity) {
+    return item.metadata.last_activity;
+  }
+  return item.last_updated_at || item.last_checked_at;
+}
+
+export function ItemCard({ item, onRemove, onToggleChecked }: ItemCardProps) {
   const typeName: Record<Item['type'], string> = {
     slack_thread: 'Slack',
-    github_action: 'GitHub Action',
+    github_action: 'Action',
     github_pr: 'PR',
-    copilot_agent: 'Copilot Agent',
-    cli_session: 'CLI Session',
+    copilot_agent: 'Copilot',
+    cli_session: 'CLI',
     opencode_session: 'OpenCode',
   };
 
   const handleOpen = () => {
-    if (item.url) {
-      invoke('open_url', { url: item.url });
+    const opencodeUrl = getOpenCodeSessionUrl(item);
+    const url = opencodeUrl || item.url;
+    if (url) {
+      invoke('open_url', { url });
     }
   };
 
@@ -32,46 +68,37 @@ export function ItemCard({ item, onRemove }: ItemCardProps) {
     }
   };
 
-  const formatDate = (dateStr?: string) => {
-    if (!dateStr) return 'Never';
-    const date = new Date(dateStr);
-    return date.toLocaleString();
+  const handleCheck = () => {
+    onToggleChecked(item.id, !item.checked);
   };
 
-  const formatEpochMs = (epochMs?: number) => {
-    if (!epochMs) return null;
-    const date = new Date(epochMs);
-    return date.toLocaleString();
-  };
-
-  const lastLlmResponse = item.type === 'opencode_session'
-    ? formatEpochMs(item.metadata?.last_activity)
-    : null;
+  const lastActivity = getLastActivity(item);
+  const lastActivityStr = timeAgo(lastActivity);
+  const hasLink = !!(getOpenCodeSessionUrl(item) || item.url);
 
   return (
-    <div className="item-card">
-      <div className="item-header">
-        <span className="type-badge">
-          {typeName[item.type]}
+    <div className={`item-row ${item.checked ? 'item-checked' : ''}`}>
+      <input
+        type="checkbox"
+        className="item-checkbox"
+        checked={item.checked}
+        onChange={handleCheck}
+      />
+      <span className="type-badge">{typeName[item.type]}</span>
+      <StatusBadge status={item.status} />
+      {hasLink ? (
+        <span className="item-title item-title-link" role="link" tabIndex={0} onClick={handleOpen} onKeyDown={e => e.key === 'Enter' && handleOpen()}>
+          {item.title}
         </span>
-        {item.url ? (
-          <button className="item-title-link" onClick={handleOpen}>
-            {item.title}
-          </button>
-        ) : (
-          <h3 className="item-title">{item.title}</h3>
-        )}
-        <StatusBadge status={item.status} />
-      </div>
-      <div className="item-meta">
-        {lastLlmResponse && (
-          <div>Last LLM response: {lastLlmResponse}</div>
-        )}
-        <div>Last checked: {formatDate(item.last_checked_at)}</div>
-      </div>
-      <div className="item-actions">
-        <button className="btn-ghost" onClick={handleRemove}>Remove</button>
-      </div>
+      ) : (
+        <span className="item-title">{item.title}</span>
+      )}
+      {lastActivityStr && (
+        <span className="item-time">{lastActivityStr}</span>
+      )}
+      <button className="btn-icon" onClick={handleRemove} title="Remove">
+        &times;
+      </button>
     </div>
   );
 }
