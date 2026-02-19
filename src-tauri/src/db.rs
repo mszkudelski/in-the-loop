@@ -191,6 +191,15 @@ impl Database {
         Ok(())
     }
 
+    pub fn update_item_title(&self, id: &str, title: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE items SET title = ?1 WHERE id = ?2",
+            params![title, id],
+        )?;
+        Ok(())
+    }
+
     pub fn update_item_poll_error(&self, id: &str, error: &str, mark_failed: bool) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         let now = chrono::Utc::now().to_rfc3339();
@@ -344,7 +353,7 @@ impl Database {
             "SELECT COUNT(*) FROM items
              WHERE archived = 0
                AND checked = 0
-               AND status IN ('completed', 'failed', 'updated', 'waiting')",
+               AND status IN ('completed', 'failed', 'updated', 'approved', 'merged', 'waiting')",
             [],
             |row| row.get(0),
         )?;

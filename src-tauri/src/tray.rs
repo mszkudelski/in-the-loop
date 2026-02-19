@@ -14,6 +14,8 @@ fn status_emoji(status: &str) -> &'static str {
         "waiting" => "\u{23F3}",
         "in_progress" => "\u{1F504}",
         "updated" => "\u{1F514}",
+        "approved" => "\u{1F44D}",
+        "merged" => "\u{1F7E3}",
         "completed" => "\u{2705}",
         "failed" => "\u{274C}",
         "archived" => "\u{1F4E6}",

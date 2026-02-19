@@ -55,8 +55,14 @@ impl PollingManager {
         for item in items {
             // Skip completed/failed items, but keep polling opencode_session
             // (archived sessions need status tracking, idle sessions may become busy)
-            if (item.status == "completed" || item.status == "failed" || item.status == "archived")
+            if (item.status == "completed" || item.status == "failed" || item.status == "archived" || item.status == "merged")
                 && item.item_type != "opencode_session"
+                && item.item_type != "github_pr"
+            {
+                continue;
+            }
+            if item.item_type == "github_pr"
+                && (item.status == "failed" || item.status == "archived" || item.status == "merged")
             {
                 continue;
             }
@@ -193,6 +199,12 @@ impl PollingManager {
 
         let result = github_pr::check_github_pr(&token, &owner, &repo, &pr_number).await?;
 
+        if let Some(pr_title) = result["title"].as_str() {
+            if !pr_title.is_empty() && pr_title != item.title {
+                db.update_item_title(&item.id, pr_title)?;
+            }
+        }
+
         // Check for changes
         let old_metadata: serde_json::Value = serde_json::from_str(&item.metadata)?;
         let old_review_count = old_metadata["review_count"].as_i64().unwrap_or(0);
@@ -206,9 +218,13 @@ impl PollingManager {
             || metadata["repo"].as_str().is_none()
             || metadata["pr_number"].as_str().is_none();
 
-        let new_status = if merged || state == "closed" {
+        let new_status = if merged {
+            "merged"
+        } else if state == "closed" {
             "completed"
-        } else if new_review_count > old_review_count || has_approval || has_changes_requested {
+        } else if has_approval {
+            "approved"
+        } else if new_review_count > old_review_count || has_changes_requested {
             "updated"
         } else {
             "in_progress"
