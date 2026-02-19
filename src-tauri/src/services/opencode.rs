@@ -42,6 +42,7 @@ pub struct SessionMessageSummary {
     pub total_cost: f64,
     pub model: Option<String>,
     pub agent: Option<String>,
+    pub has_pending_question: bool,
 }
 
 pub struct OpenCodeConfig {
@@ -217,6 +218,7 @@ pub async fn get_session_message_summary(
         total_cost,
         model,
         agent,
+        has_pending_question: false,
     })
 }
 
@@ -283,6 +285,37 @@ pub fn build_web_url(base_url: &str, directory: &str) -> String {
     format!("{}/{}", base_url, encoded)
 }
 
+pub async fn get_pending_question_session_ids(
+    base_url: &str,
+    password: &str,
+    directories: &[String],
+) -> Result<Vec<String>> {
+    let client = build_client();
+    let url = format!("{}/question", base_url);
+    let mut all_session_ids = Vec::new();
+
+    for dir in directories {
+        let response = build_request(&client, &url, password)
+            .query(&[("directory", dir.as_str())])
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            continue;
+        }
+
+        let questions: Vec<serde_json::Value> = response.json().await.unwrap_or_default();
+
+        for q in &questions {
+            if let Some(sid) = q.get("sessionID").and_then(|v| v.as_str()) {
+                all_session_ids.push(sid.to_string());
+            }
+        }
+    }
+
+    Ok(all_session_ids)
+}
+
 pub async fn check_opencode_health(
     base_url: &str,
     password: &str,
@@ -305,6 +338,7 @@ pub async fn poll_opencode_session(
     password: &str,
     session_id: &str,
     statuses: &HashMap<String, SessionStatus>,
+    pending_question_session_ids: &[String],
 ) -> Result<HashMap<String, serde_json::Value>> {
     let summary = get_session_message_summary(base_url, password, session_id).await?;
 
@@ -315,6 +349,8 @@ pub async fn poll_opencode_session(
         None => "unknown",
     };
 
+    let has_pending_question = pending_question_session_ids.contains(&session_id.to_string());
+
     let mut result = HashMap::new();
     result.insert(
         "session_id".to_string(),
@@ -323,6 +359,10 @@ pub async fn poll_opencode_session(
     result.insert(
         "session_status".to_string(),
         serde_json::json!(status_str),
+    );
+    result.insert(
+        "has_pending_question".to_string(),
+        serde_json::json!(has_pending_question),
     );
     result.insert(
         "model".to_string(),
