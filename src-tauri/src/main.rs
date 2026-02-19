@@ -45,6 +45,18 @@ fn main() {
             // Setup system tray
             tray::setup_tray(app)?;
 
+            if let Ok(settings) = database.get_all_settings() {
+                if let Some(window) = app.get_webview_window("main") {
+                    if let Ok(current_size) = window.outer_size() {
+                        let new_size = tauri::PhysicalSize::new(
+                            settings.screen_width as u32,
+                            current_size.height,
+                        );
+                        let _ = window.set_size(new_size);
+                    }
+                }
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {
