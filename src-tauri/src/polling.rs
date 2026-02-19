@@ -1,5 +1,6 @@
 use crate::db::{Database, Item};
 use crate::services::{github_actions, github_pr, opencode, slack, url_parser};
+use crate::tray;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,6 +34,9 @@ impl PollingManager {
                 if let Err(e) = Self::poll_items(&db, &app_handle).await {
                     eprintln!("Error polling items: {}", e);
                 }
+
+                tray::update_tray_badge(&app_handle, &db);
+                tray::rebuild_tray_menu(&app_handle, &db);
 
                 time::sleep(Duration::from_secs(interval)).await;
             }
