@@ -275,6 +275,16 @@ button:focus-visible {
   color: #8ed8aa;
 }
 
+.status-approved {
+  background: #1a3d1a;
+  color: #8ed88e;
+}
+
+.status-merged {
+  background: #2d1a4a;
+  color: #c4a5f0;
+}
+
 .status-completed {
   background: #1a4030;
   color: #a5e0b8;
@@ -459,6 +469,16 @@ button:focus-visible {
   .status-completed {
     background: #e8f7ec;
     color: #166534;
+  }
+
+  .status-approved {
+    background: #dcfce7;
+    color: #15803d;
+  }
+
+  .status-merged {
+    background: #f3e8ff;
+    color: #7e22ce;
   }
 
   .status-failed {

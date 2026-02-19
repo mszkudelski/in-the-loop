@@ -10,6 +10,8 @@ export type ItemStatus =
   | 'waiting' 
   | 'in_progress' 
   | 'updated' 
+  | 'approved'
+  | 'merged'
   | 'completed' 
   | 'failed'
   | 'archived';
