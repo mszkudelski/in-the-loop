@@ -359,7 +359,7 @@ impl Database {
             "SELECT COUNT(*) FROM items
              WHERE archived = 0
                AND checked = 0
-               AND status IN ('completed', 'failed', 'updated', 'approved', 'merged', 'waiting')",
+                AND status IN ('completed', 'failed', 'updated', 'approved', 'merged', 'waiting', 'input_needed')",
             [],
             |row| row.get(0),
         )?;
