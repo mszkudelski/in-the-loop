@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -42,7 +42,7 @@ pub struct Database {
 impl Database {
     pub fn new(db_path: PathBuf) -> Result<Self> {
         let conn = Connection::open(db_path)?;
-        
+
         // Create tables
         conn.execute(
             "CREATE TABLE IF NOT EXISTS items (
@@ -64,9 +64,7 @@ impl Database {
         )?;
 
         // Migration: add checked column if missing
-        let has_checked = conn
-            .prepare("SELECT checked FROM items LIMIT 0")
-            .is_ok();
+        let has_checked = conn.prepare("SELECT checked FROM items LIMIT 0").is_ok();
         if !has_checked {
             conn.execute(
                 "ALTER TABLE items ADD COLUMN checked INTEGER NOT NULL DEFAULT 0",
@@ -134,24 +132,25 @@ impl Database {
              FROM items WHERE archived = ?1 ORDER BY created_at DESC"
         )?;
 
-        let items = stmt.query_map([archived as i32], |row| {
-            Ok(Item {
-                id: row.get(0)?,
-                item_type: row.get(1)?,
-                title: row.get(2)?,
-                url: row.get(3)?,
-                status: row.get(4)?,
-                previous_status: row.get(5)?,
-                metadata: row.get(6)?,
-                last_checked_at: row.get(7)?,
-                last_updated_at: row.get(8)?,
-                created_at: row.get(9)?,
-                archived: row.get::<_, i32>(10)? != 0,
-                polling_interval_override: row.get(11)?,
-                checked: row.get::<_, i32>(12)? != 0,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+        let items = stmt
+            .query_map([archived as i32], |row| {
+                Ok(Item {
+                    id: row.get(0)?,
+                    item_type: row.get(1)?,
+                    title: row.get(2)?,
+                    url: row.get(3)?,
+                    status: row.get(4)?,
+                    previous_status: row.get(5)?,
+                    metadata: row.get(6)?,
+                    last_checked_at: row.get(7)?,
+                    last_updated_at: row.get(8)?,
+                    created_at: row.get(9)?,
+                    archived: row.get::<_, i32>(10)? != 0,
+                    polling_interval_override: row.get(11)?,
+                    checked: row.get::<_, i32>(12)? != 0,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(items)
     }
@@ -159,11 +158,11 @@ impl Database {
     pub fn update_item_status(&self, id: &str, status: &str, metadata: Option<&str>) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         let now = chrono::Utc::now().to_rfc3339();
-        
+
         // First, get the current status to save as previous_status
         let mut stmt = conn.prepare("SELECT status FROM items WHERE id = ?1")?;
         let current_status: String = stmt.query_row([id], |row| row.get(0))?;
-        
+
         if let Some(meta) = metadata {
             conn.execute(
                 "UPDATE items SET status = ?1, previous_status = ?2, 
@@ -248,21 +247,21 @@ impl Database {
 
     pub fn get_opencode_session_ids(&self) -> Result<Vec<String>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT metadata FROM items WHERE type = 'opencode_session'"
-        )?;
-        let ids = stmt.query_map([], |row| {
-            let meta: String = row.get(0)?;
-            Ok(meta)
-        })?
-        .filter_map(|m| {
-            m.ok().and_then(|meta_str| {
-                serde_json::from_str::<serde_json::Value>(&meta_str)
-                    .ok()
-                    .and_then(|v| v["session_id"].as_str().map(|s| s.to_string()))
+        let mut stmt =
+            conn.prepare("SELECT metadata FROM items WHERE type = 'opencode_session'")?;
+        let ids = stmt
+            .query_map([], |row| {
+                let meta: String = row.get(0)?;
+                Ok(meta)
+            })?
+            .filter_map(|m| {
+                m.ok().and_then(|meta_str| {
+                    serde_json::from_str::<serde_json::Value>(&meta_str)
+                        .ok()
+                        .and_then(|v| v["session_id"].as_str().map(|s| s.to_string()))
+                })
             })
-        })
-        .collect();
+            .collect();
         Ok(ids)
     }
 
@@ -279,7 +278,7 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare("SELECT value FROM credentials WHERE key = ?1")?;
         let mut rows = stmt.query(params![key])?;
-        
+
         if let Some(row) = rows.next()? {
             Ok(Some(row.get(0)?))
         } else {
@@ -300,7 +299,7 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = ?1")?;
         let mut rows = stmt.query(params![key])?;
-        
+
         if let Some(row) = rows.next()? {
             Ok(Some(row.get(0)?))
         } else {
@@ -308,8 +307,53 @@ impl Database {
         }
     }
 
+    pub fn get_visible_items(&self) -> Result<Vec<Item>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, type, title, url, status, previous_status, metadata,
+                    last_checked_at, last_updated_at, created_at, archived, polling_interval_override, checked
+             FROM items WHERE archived = 0 AND checked = 0 ORDER BY created_at DESC"
+        )?;
+
+        let items = stmt
+            .query_map([], |row| {
+                Ok(Item {
+                    id: row.get(0)?,
+                    item_type: row.get(1)?,
+                    title: row.get(2)?,
+                    url: row.get(3)?,
+                    status: row.get(4)?,
+                    previous_status: row.get(5)?,
+                    metadata: row.get(6)?,
+                    last_checked_at: row.get(7)?,
+                    last_updated_at: row.get(8)?,
+                    created_at: row.get(9)?,
+                    archived: row.get::<_, i32>(10)? != 0,
+                    polling_interval_override: row.get(11)?,
+                    checked: row.get::<_, i32>(12)? != 0,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(items)
+    }
+
+    pub fn count_actionable_items(&self) -> Result<i64> {
+        let conn = self.conn.lock().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM items
+             WHERE archived = 0
+               AND checked = 0
+               AND status IN ('completed', 'failed', 'updated', 'waiting')",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
     pub fn get_all_settings(&self) -> Result<Settings> {
-        let polling_interval = self.get_setting("polling_interval")?
+        let polling_interval = self
+            .get_setting("polling_interval")?
             .unwrap_or_else(|| "30".to_string())
             .parse()
             .unwrap_or(30);
