@@ -3,7 +3,7 @@ use crate::services::url_parser;
 use crate::tray;
 use anyhow::Result;
 use std::sync::Arc;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
 
 pub struct AppState {
@@ -112,12 +112,24 @@ pub async fn save_credentials(
 #[tauri::command]
 pub async fn save_settings(
     settings: Settings,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     state
         .db
         .save_setting("polling_interval", &settings.polling_interval.to_string())
         .map_err(|e| e.to_string())?;
+
+    state
+        .db
+        .save_setting("screen_width", &settings.screen_width.to_string())
+        .map_err(|e| e.to_string())?;
+
+    if let Some(window) = app.get_webview_window("main") {
+        let current_size = window.outer_size().map_err(|e| e.to_string())?;
+        let new_size = tauri::PhysicalSize::new(settings.screen_width as u32, current_size.height);
+        window.set_size(new_size).map_err(|e| e.to_string())?;
+    }
 
     Ok(())
 }

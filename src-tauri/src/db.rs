@@ -33,6 +33,7 @@ pub struct Credentials {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub polling_interval: i64,
+    pub screen_width: i64,
 }
 
 pub struct Database {
@@ -91,6 +92,11 @@ impl Database {
         // Set default polling interval if not exists
         conn.execute(
             "INSERT OR IGNORE INTO settings (key, value) VALUES ('polling_interval', '30')",
+            [],
+        )?;
+
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES ('screen_width', '400')",
             [],
         )?;
 
@@ -367,6 +373,15 @@ impl Database {
             .parse()
             .unwrap_or(30);
 
-        Ok(Settings { polling_interval })
+        let screen_width = self
+            .get_setting("screen_width")?
+            .unwrap_or_else(|| "400".to_string())
+            .parse()
+            .unwrap_or(400);
+
+        Ok(Settings {
+            polling_interval,
+            screen_width,
+        })
     }
 }
