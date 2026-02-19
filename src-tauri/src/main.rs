@@ -1,14 +1,9 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use in_the_loop_lib::{commands, db, local_server, polling};
+use in_the_loop_lib::{commands, db, local_server, polling, tray};
 use std::sync::Arc;
-use tauri::{
-    image::Image,
-    menu::{Menu, MenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, WindowEvent,
-};
+use tauri::{Manager, WindowEvent};
 
 fn main() {
     tauri::Builder::default()
@@ -48,13 +43,12 @@ fn main() {
             });
 
             // Setup system tray
-            setup_tray(app)?;
+            tray::setup_tray(app)?;
 
             Ok(())
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                // Hide window instead of closing
                 window.hide().unwrap();
                 api.prevent_close();
             }
@@ -73,50 +67,4 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    // Create tray menu
-    let show_item = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
-    let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
-
-    // Load tray icon (using a simple generated icon for now)
-    let icon_bytes = include_bytes!("../icons/icon.png");
-    let icon = Image::from_bytes(icon_bytes)?;
-
-    // Build tray icon
-    let _tray = TrayIconBuilder::new()
-        .icon(icon)
-        .menu(&menu)
-        .tooltip("In The Loop")
-        .on_menu_event(|app, event| match event.id().as_ref() {
-            "show" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    window.show().unwrap();
-                    window.set_focus().unwrap();
-                }
-            }
-            "quit" => {
-                app.exit(0);
-            }
-            _ => {}
-        })
-        .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = event
-            {
-                let app = tray.app_handle();
-                if let Some(window) = app.get_webview_window("main") {
-                    window.show().unwrap();
-                    window.set_focus().unwrap();
-                }
-            }
-        })
-        .build(app)?;
-
-    Ok(())
 }
