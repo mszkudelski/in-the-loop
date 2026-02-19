@@ -19,6 +19,7 @@ pub struct Item {
     pub created_at: String,
     pub archived: bool,
     pub polling_interval_override: Option<i64>,
+    pub checked: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,10 +57,22 @@ impl Database {
                 last_updated_at TEXT,
                 created_at TEXT NOT NULL,
                 archived INTEGER NOT NULL DEFAULT 0,
-                polling_interval_override INTEGER
+                polling_interval_override INTEGER,
+                checked INTEGER NOT NULL DEFAULT 0
             )",
             [],
         )?;
+
+        // Migration: add checked column if missing
+        let has_checked = conn
+            .prepare("SELECT checked FROM items LIMIT 0")
+            .is_ok();
+        if !has_checked {
+            conn.execute(
+                "ALTER TABLE items ADD COLUMN checked INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS credentials (
@@ -92,8 +105,8 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO items (id, type, title, url, status, previous_status, metadata, 
-                               last_checked_at, last_updated_at, created_at, archived, polling_interval_override)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                               last_checked_at, last_updated_at, created_at, archived, polling_interval_override, checked)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 item.id,
                 item.item_type,
@@ -107,6 +120,7 @@ impl Database {
                 item.created_at,
                 item.archived as i32,
                 item.polling_interval_override,
+                item.checked as i32,
             ],
         )?;
         Ok(())
@@ -116,7 +130,7 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, type, title, url, status, previous_status, metadata,
-                    last_checked_at, last_updated_at, created_at, archived, polling_interval_override
+                    last_checked_at, last_updated_at, created_at, archived, polling_interval_override, checked
              FROM items WHERE archived = ?1 ORDER BY created_at DESC"
         )?;
 
@@ -134,6 +148,7 @@ impl Database {
                 created_at: row.get(9)?,
                 archived: row.get::<_, i32>(10)? != 0,
                 polling_interval_override: row.get(11)?,
+                checked: row.get::<_, i32>(12)? != 0,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -220,6 +235,35 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM items WHERE id = ?1", params![id])?;
         Ok(())
+    }
+
+    pub fn toggle_checked(&self, id: &str, checked: bool) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE items SET checked = ?1 WHERE id = ?2",
+            params![checked as i32, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_opencode_session_ids(&self) -> Result<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT metadata FROM items WHERE type = 'opencode_session'"
+        )?;
+        let ids = stmt.query_map([], |row| {
+            let meta: String = row.get(0)?;
+            Ok(meta)
+        })?
+        .filter_map(|m| {
+            m.ok().and_then(|meta_str| {
+                serde_json::from_str::<serde_json::Value>(&meta_str)
+                    .ok()
+                    .and_then(|v| v["session_id"].as_str().map(|s| s.to_string()))
+            })
+        })
+        .collect();
+        Ok(ids)
     }
 
     pub fn save_credential(&self, key: &str, value: &str) -> Result<()> {

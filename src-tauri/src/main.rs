@@ -63,9 +63,12 @@ fn main() {
             commands::add_item,
             commands::get_items,
             commands::remove_item,
+            commands::toggle_checked,
             commands::save_credentials,
             commands::save_settings,
             commands::get_settings,
+            commands::save_setting,
+            commands::get_setting,
             commands::open_url,
         ])
         .run(tauri::generate_context!())

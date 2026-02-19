@@ -10,13 +10,15 @@ export function Dashboard() {
   const [items, setItems] = useState<Item[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [filter, setFilter] = useState<Item['type'] | 'all'>('all');
+  const [hideChecked, setHideChecked] = useState(false);
 
   useEffect(() => {
     loadItems();
+    invoke<string | null>('get_setting', { key: 'hide_checked' }).then(val => {
+      if (val === 'true') setHideChecked(true);
+    }).catch(() => {});
 
-    // Listen for item updates from backend
-    const unlisten = listen('item-updated', (event) => {
-      console.log('Item updated:', event);
+    const unlisten = listen('item-updated', () => {
       loadItems();
     });
 
@@ -28,7 +30,11 @@ export function Dashboard() {
   const loadItems = async () => {
     try {
       const loadedItems: Item[] = await invoke('get_items', { archived: false });
-      setItems(loadedItems);
+      const parsedItems = loadedItems.map(item => ({
+        ...item,
+        metadata: typeof item.metadata === 'string' ? JSON.parse(item.metadata) : item.metadata,
+      }));
+      setItems(parsedItems);
     } catch (error) {
       console.error('Failed to load items:', error);
     }
@@ -38,11 +44,25 @@ export function Dashboard() {
     setItems(items.filter(item => item.id !== id));
   };
 
-  const filteredItems = filter === 'all' 
+  const handleToggleChecked = async (id: string, checked: boolean) => {
+    try {
+      await invoke('toggle_checked', { id, checked });
+      setItems(prev => prev.map(item =>
+        item.id === id ? { ...item, checked } : item
+      ));
+    } catch (error) {
+      console.error('Failed to toggle checked:', error);
+    }
+  };
+
+  const filteredItems = (filter === 'all' 
     ? items 
-    : items.filter(item => item.type === filter);
+    : items.filter(item => item.type === filter)
+  ).filter(item => !hideChecked || !item.checked);
 
   const sortedItems = [...filteredItems].sort((a, b) => {
+    if (a.checked && !b.checked) return 1;
+    if (!a.checked && b.checked) return -1;
     if (a.status === 'archived' && b.status !== 'archived') return 1;
     if (a.status !== 'archived' && b.status === 'archived') return -1;
     return 0;
@@ -60,19 +80,13 @@ export function Dashboard() {
 
   return (
     <div className="container">
-      <h1 className="page-title">In The Loop</h1>
-      <p className="page-subtitle">
-        Track your async work items in one place
-      </p>
-
-      <div className="toolbar">
-        <button onClick={() => setShowSettings(!showSettings)}>
-          {showSettings ? 'Hide Settings' : 'Show Settings'}
-        </button>
-        <button onClick={loadItems}>Refresh</button>
+      <div className="header-row">
+        <h1 className="page-title">In The Loop</h1>
+        <div className="header-actions">
+          <button className="btn-ghost" onClick={loadItems}>Refresh</button>
+          <button className="btn-ghost" onClick={() => setShowSettings(true)}>Settings</button>
+        </div>
       </div>
-
-      {showSettings && <Settings />}
 
       <AddItemForm onItemAdded={loadItems} />
 
@@ -83,54 +97,97 @@ export function Dashboard() {
         >
           All ({typeCounts.all})
         </button>
-        <button 
-          onClick={() => setFilter('slack_thread')}
-          className={`filter-chip ${filter === 'slack_thread' ? 'active' : ''}`}
-        >
-          Slack ({typeCounts.slack_thread})
-        </button>
-        <button 
-          onClick={() => setFilter('github_action')}
-          className={`filter-chip ${filter === 'github_action' ? 'active' : ''}`}
-        >
-          Actions ({typeCounts.github_action})
-        </button>
-        <button 
-          onClick={() => setFilter('github_pr')}
-          className={`filter-chip ${filter === 'github_pr' ? 'active' : ''}`}
-        >
-          PRs ({typeCounts.github_pr})
-        </button>
-        <button 
-          onClick={() => setFilter('copilot_agent')}
-          className={`filter-chip ${filter === 'copilot_agent' ? 'active' : ''}`}
-        >
-          Copilot ({typeCounts.copilot_agent})
-        </button>
-        <button 
-          onClick={() => setFilter('cli_session')}
-          className={`filter-chip ${filter === 'cli_session' ? 'active' : ''}`}
-        >
-          CLI ({typeCounts.cli_session})
-        </button>
-        <button 
-          onClick={() => setFilter('opencode_session')}
-          className={`filter-chip ${filter === 'opencode_session' ? 'active' : ''}`}
-        >
-          OpenCode ({typeCounts.opencode_session})
-        </button>
+        {typeCounts.slack_thread > 0 && (
+          <button 
+            onClick={() => setFilter('slack_thread')}
+            className={`filter-chip ${filter === 'slack_thread' ? 'active' : ''}`}
+          >
+            Slack ({typeCounts.slack_thread})
+          </button>
+        )}
+        {typeCounts.github_action > 0 && (
+          <button 
+            onClick={() => setFilter('github_action')}
+            className={`filter-chip ${filter === 'github_action' ? 'active' : ''}`}
+          >
+            Actions ({typeCounts.github_action})
+          </button>
+        )}
+        {typeCounts.github_pr > 0 && (
+          <button 
+            onClick={() => setFilter('github_pr')}
+            className={`filter-chip ${filter === 'github_pr' ? 'active' : ''}`}
+          >
+            PRs ({typeCounts.github_pr})
+          </button>
+        )}
+        {typeCounts.copilot_agent > 0 && (
+          <button 
+            onClick={() => setFilter('copilot_agent')}
+            className={`filter-chip ${filter === 'copilot_agent' ? 'active' : ''}`}
+          >
+            Copilot ({typeCounts.copilot_agent})
+          </button>
+        )}
+        {typeCounts.cli_session > 0 && (
+          <button 
+            onClick={() => setFilter('cli_session')}
+            className={`filter-chip ${filter === 'cli_session' ? 'active' : ''}`}
+          >
+            CLI ({typeCounts.cli_session})
+          </button>
+        )}
+        {typeCounts.opencode_session > 0 && (
+          <button 
+            onClick={() => setFilter('opencode_session')}
+            className={`filter-chip ${filter === 'opencode_session' ? 'active' : ''}`}
+          >
+            OpenCode ({typeCounts.opencode_session})
+          </button>
+        )}
+        <label className="filter-toggle">
+          <input
+            type="checkbox"
+            checked={hideChecked}
+            onChange={() => {
+              const next = !hideChecked;
+              setHideChecked(next);
+              invoke('save_setting', { key: 'hide_checked', value: String(next) }).catch(() => {});
+            }}
+          />
+          Hide checked
+        </label>
       </div>
 
       {sortedItems.length === 0 ? (
         <div className="empty-state">
           {items.length === 0 
-            ? 'No items tracked yet. Add a URL above to get started!' 
+            ? 'No items tracked yet. Add a URL above to get started.' 
             : 'No items in this category'}
         </div>
       ) : (
-        sortedItems.map(item => (
-          <ItemCard key={item.id} item={item} onRemove={handleRemove} />
-        ))
+        <div className="item-list">
+          {sortedItems.map(item => (
+            <ItemCard
+              key={item.id}
+              item={item}
+              onRemove={handleRemove}
+              onToggleChecked={handleToggleChecked}
+            />
+          ))}
+        </div>
+      )}
+
+      {showSettings && (
+        <div className="modal-backdrop" onClick={() => setShowSettings(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Settings</h2>
+              <button className="btn-icon" onClick={() => setShowSettings(false)}>&times;</button>
+            </div>
+            <Settings />
+          </div>
+        </div>
       )}
     </div>
   );

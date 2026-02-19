@@ -220,6 +220,69 @@ pub async fn get_session_message_summary(
     })
 }
 
+pub fn enumerate_opencode_directories() -> Vec<String> {
+    let home = match std::env::var("HOME") {
+        Ok(h) => h,
+        Err(_) => return vec![],
+    };
+    let storage_path = std::path::PathBuf::from(&home)
+        .join(".local/share/opencode/storage/session");
+    let entries = match std::fs::read_dir(&storage_path) {
+        Ok(e) => e,
+        Err(_) => return vec![],
+    };
+    let mut directories = vec![];
+    for entry in entries.flatten() {
+        if !entry.path().is_dir() {
+            continue;
+        }
+        if let Ok(files) = std::fs::read_dir(entry.path()) {
+            for file in files.flatten() {
+                let path = file.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                            if let Some(dir) = val["directory"].as_str() {
+                                directories.push(dir.to_string());
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    directories
+}
+
+pub fn find_session_directory(session_id: &str) -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    let storage_path = std::path::PathBuf::from(&home)
+        .join(".local/share/opencode/storage/session");
+    let entries = std::fs::read_dir(&storage_path).ok()?;
+
+    for entry in entries.flatten() {
+        if !entry.path().is_dir() {
+            continue;
+        }
+        let session_file = entry.path().join(format!("{}.json", session_id));
+        if session_file.exists() {
+            if let Ok(content) = std::fs::read_to_string(&session_file) {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                    return val["directory"].as_str().map(|s| s.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn build_web_url(base_url: &str, directory: &str) -> String {
+    use base64::Engine;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(directory.as_bytes());
+    format!("{}/{}", base_url, encoded)
+}
+
 pub async fn check_opencode_health(
     base_url: &str,
     password: &str,

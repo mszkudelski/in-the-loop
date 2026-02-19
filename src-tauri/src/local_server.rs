@@ -73,6 +73,7 @@ async fn create_session(
         created_at: now,
         archived: false,
         polling_interval_override: None,
+        checked: false,
     };
 
     match state.db.add_item(&item) {
