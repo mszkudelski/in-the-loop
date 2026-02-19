@@ -1,8 +1,9 @@
 use crate::db::{Credentials, Database, Item, Settings};
 use crate::services::url_parser;
+use crate::tray;
 use anyhow::Result;
 use std::sync::Arc;
-use tauri::State;
+use tauri::{AppHandle, State};
 use uuid::Uuid;
 
 pub struct AppState {
@@ -13,6 +14,7 @@ pub struct AppState {
 pub async fn add_item(
     url: String,
     custom_title: Option<String>,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let parsed = url_parser::parse_url(&url).map_err(|e| e.to_string())?;
@@ -34,6 +36,7 @@ pub async fn add_item(
     };
 
     state.db.add_item(&item).map_err(|e| e.to_string())?;
+    tray::refresh_tray(&app, &state.db);
     Ok(())
 }
 
@@ -43,20 +46,25 @@ pub async fn get_items(archived: bool, state: State<'_, AppState>) -> Result<Vec
 }
 
 #[tauri::command]
-pub async fn remove_item(id: String, state: State<'_, AppState>) -> Result<(), String> {
-    state.db.remove_item(&id).map_err(|e| e.to_string())
+pub async fn remove_item(id: String, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    state.db.remove_item(&id).map_err(|e| e.to_string())?;
+    tray::refresh_tray(&app, &state.db);
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn toggle_checked(
     id: String,
     checked: bool,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     state
         .db
         .toggle_checked(&id, checked)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    tray::refresh_tray(&app, &state.db);
+    Ok(())
 }
 
 #[tauri::command]
