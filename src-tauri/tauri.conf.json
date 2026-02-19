@@ -36,13 +36,7 @@
         }
       ]
     },
-    "trayIcon": {
-      "id": "main-tray",
-      "iconPath": "icons/icon.png",
-      "iconAsTemplate": true,
-      "menuOnLeftClick": false,
-      "tooltip": "In The Loop"
-    }
+    "trayIcon": null
   },
   "bundle": {
     "active": true,
