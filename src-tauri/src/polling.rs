@@ -266,7 +266,7 @@ impl PollingManager {
 
     async fn get_opencode_context(
         db: &Arc<Database>,
-    ) -> Option<(String, String, HashMap<String, opencode::SessionStatus>)> {
+    ) -> Option<(String, String, HashMap<String, opencode::SessionStatus>, Vec<String>)> {
         let raw_url = db.get_credential("opencode_url").ok().flatten()?;
         if raw_url.is_empty() {
             return None;
@@ -278,7 +278,6 @@ impl PollingManager {
             .flatten()
             .unwrap_or_default();
 
-        // Fetch statuses from ALL directories so sessions across projects get correct status
         let directories = opencode::enumerate_opencode_directories();
         let mut all_statuses = HashMap::new();
         for dir in &directories {
@@ -287,7 +286,11 @@ impl PollingManager {
             }
         }
 
-        Some((config.base_url, password, all_statuses))
+        let pending_question_session_ids = opencode::get_pending_question_session_ids(&config.base_url, &password, &directories)
+            .await
+            .unwrap_or_default();
+
+        Some((config.base_url, password, all_statuses, pending_question_session_ids))
     }
 
     async fn discover_opencode_sessions(
@@ -386,11 +389,11 @@ impl PollingManager {
     async fn poll_opencode_session(
         db: &Arc<Database>,
         item: &crate::db::Item,
-        context: &Option<(String, String, HashMap<String, opencode::SessionStatus>)>,
+        context: &Option<(String, String, HashMap<String, opencode::SessionStatus>, Vec<String>)>,
         app_handle: &AppHandle,
     ) -> anyhow::Result<()> {
-        let (url, password, statuses) = match context {
-            Some(ctx) => (&ctx.0, &ctx.1, &ctx.2),
+        let (url, password, statuses, pending_question_session_ids) = match context {
+            Some(ctx) => (&ctx.0, &ctx.1, &ctx.2, &ctx.3),
             None => {
                 db.update_item_status(&item.id, &item.status, None)?;
                 return Ok(());
@@ -405,7 +408,7 @@ impl PollingManager {
         let resolved_dir = stored_dir.or_else(|| opencode::find_session_directory(session_id));
 
         let result =
-            opencode::poll_opencode_session(url, password, session_id, statuses).await?;
+            opencode::poll_opencode_session(url, password, session_id, statuses, pending_question_session_ids).await?;
 
         let session_status = result
             .get("session_status")
@@ -419,8 +422,15 @@ impl PollingManager {
             .map(|s| s.time.archived.is_some())
             .unwrap_or(false);
 
+        let has_pending_question = result
+            .get("has_pending_question")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
         let new_status = if is_archived {
             "archived"
+        } else if has_pending_question {
+            "input_needed"
         } else {
             match session_status {
                 "busy" | "retry" => "in_progress",
@@ -456,9 +466,10 @@ impl PollingManager {
 
         if new_status != item.status {
             let notification_body = match (item.status.as_str(), new_status) {
-                ("in_progress", "completed") => Some("Waiting for your input"),
+                ("in_progress", "input_needed") => Some("Waiting for your input"),
+                ("in_progress", "completed") => Some("Agent finished working"),
                 (_, "archived") => Some("Session has been archived"),
-                ("completed", "in_progress") => Some("Agent started working"),
+                ("input_needed" | "completed", "in_progress") => Some("Agent started working"),
                 _ => None,
             };
 
@@ -476,8 +487,8 @@ impl PollingManager {
             db.toggle_checked(&item.id, true)?;
         }
 
-        // Auto-uncheck when session becomes active again (completed/failed → waiting/in_progress)
-        if (item.status == "completed" || item.status == "failed")
+        // Auto-uncheck when session becomes active again (input_needed/completed/failed → waiting/in_progress)
+        if (item.status == "input_needed" || item.status == "completed" || item.status == "failed")
             && (new_status == "waiting" || new_status == "in_progress")
         {
             db.toggle_checked(&item.id, false)?;
