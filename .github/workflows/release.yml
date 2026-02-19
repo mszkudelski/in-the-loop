@@ -12,24 +12,96 @@ concurrency:
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
-  release-please:
+  release:
     runs-on: ubuntu-latest
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
+      release_created: ${{ steps.bump.outputs.release_created }}
+      tag_name: ${{ steps.bump.outputs.tag_name }}
     steps:
-      - uses: googleapis/release-please-action@v4
-        id: release
+      - uses: actions/checkout@v4
         with:
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
+          fetch-depth: 0
+
+      - name: Determine version bump from conventional commits
+        id: bump
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Get the latest tag, or default to v0.0.0 if none exists
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "Latest tag: $LATEST_TAG"
+
+          # Get commits since last tag (or all commits if no tag)
+          if [ "$LATEST_TAG" = "v0.0.0" ]; then
+            COMMITS=$(git log --pretty=format:"%s" HEAD)
+          else
+            COMMITS=$(git log --pretty=format:"%s" "${LATEST_TAG}..HEAD")
+          fi
+
+          if [ -z "$COMMITS" ]; then
+            echo "No new commits since $LATEST_TAG"
+            echo "release_created=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Commits since $LATEST_TAG:"
+          echo "$COMMITS"
+
+          # Determine bump type from conventional commits
+          BUMP="none"
+          if echo "$COMMITS" | grep -qE "^(feat|fix|refactor|perf)(\(.+\))?!:|BREAKING CHANGE:"; then
+            BUMP="minor"  # breaking changes bump minor while on 0.x
+          elif echo "$COMMITS" | grep -qE "^feat(\(.+\))?:"; then
+            BUMP="minor"
+          elif echo "$COMMITS" | grep -qE "^fix(\(.+\))?:"; then
+            BUMP="patch"
+          fi
+
+          if [ "$BUMP" = "none" ]; then
+            echo "No feat/fix commits found — skipping release"
+            echo "release_created=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Parse current version from package.json
+          CURRENT=$(grep -o '"version": "[^"]*"' package.json | head -1 | cut -d'"' -f4)
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+
+          case "$BUMP" in
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          TAG_NAME="v${NEW_VERSION}"
+          echo "Bumping $CURRENT -> $NEW_VERSION ($BUMP)"
+
+          # Update version in all files
+          sed -i "s/\"version\": \"${CURRENT}\"/\"version\": \"${NEW_VERSION}\"/" package.json
+          sed -i "s/\"version\": \"${CURRENT}\"/\"version\": \"${NEW_VERSION}\"/" src-tauri/tauri.conf.json
+          sed -i "s/^version = \"${CURRENT}\"/version = \"${NEW_VERSION}\"/" src-tauri/Cargo.toml
+
+          # Commit version bump
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml
+          git commit -m "chore: release ${TAG_NAME}"
+          git push
+
+          # Create GitHub Release (also creates the git tag)
+          gh release create "$TAG_NAME" \
+            --title "In The Loop ${TAG_NAME}" \
+            --generate-notes \
+            --target main
+
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "release_created=true" >> "$GITHUB_OUTPUT"
 
   build-tauri:
-    needs: release-please
-    if: ${{ needs.release-please.outputs.release_created }}
+    needs: release
+    if: ${{ needs.release.outputs.release_created == 'true' }}
     permissions:
       contents: write
     strategy:
@@ -46,7 +118,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: ${{ needs.release.outputs.tag_name }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -72,8 +144,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ needs.release-please.outputs.tag_name }}
-          releaseName: "In The Loop ${{ needs.release-please.outputs.tag_name }}"
+          tagName: ${{ needs.release.outputs.tag_name }}
+          releaseName: "In The Loop ${{ needs.release.outputs.tag_name }}"
           releaseBody: "See the assets to download and install this version."
           releaseDraft: false
           prerelease: false
