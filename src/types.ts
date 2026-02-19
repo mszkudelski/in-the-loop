@@ -41,6 +41,7 @@ export interface Credentials {
 
 export interface Settings {
   polling_interval: number;
+  screen_width: number;
 }
 
 export interface AddItemRequest {
