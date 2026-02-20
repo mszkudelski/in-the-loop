@@ -53,16 +53,18 @@ impl PollingManager {
         let opencode_statuses = Self::get_opencode_context(db).await;
 
         for item in items {
-            // Skip completed/failed items, but keep polling opencode_session
-            // (archived sessions need status tracking, idle sessions may become busy)
-            if (item.status == "completed" || item.status == "failed" || item.status == "archived" || item.status == "merged")
+            // Skip terminal items, but keep polling opencode_session
+            // (archived sessions need status tracking, idle sessions may become busy).
+            // "failed" github_action/github_pr items are re-polled so they can recover
+            // if the failure was due to a transient polling error.
+            if (item.status == "completed" || item.status == "archived" || item.status == "merged")
                 && item.item_type != "opencode_session"
                 && item.item_type != "github_pr"
             {
                 continue;
             }
             if item.item_type == "github_pr"
-                && (item.status == "failed" || item.status == "archived" || item.status == "merged")
+                && (item.status == "archived" || item.status == "merged")
             {
                 continue;
             }
@@ -92,14 +94,12 @@ impl PollingManager {
         Ok(())
     }
 
-    fn is_permanent_github_error(item_type: &str, error: &str) -> bool {
-        if item_type != "github_action" && item_type != "github_pr" {
-            return false;
-        }
-
-        error.contains("GitHub API error: 401")
-            || error.contains("GitHub API error: 403")
-            || error.contains("GitHub API error: 404")
+    fn is_permanent_github_error(_item_type: &str, _error: &str) -> bool {
+        // Never mark items as "failed" due to polling/API errors.
+        // "failed" should only come from the actual GitHub conclusion (failure/cancelled).
+        // Auth errors (401/403) can be resolved by the user re-configuring the token,
+        // and 404 may be a temporary SSO issue. The error is still stored in metadata.
+        false
     }
 
     async fn poll_slack_thread(db: &Arc<Database>, item: &crate::db::Item) -> anyhow::Result<()> {
