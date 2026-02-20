@@ -143,10 +143,22 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Ed25519 signing key for the updater (mandatory).
+          # Generate once with: npm run tauri signer generate -- -w ~/.tauri/myapp.key
+          # Store the private key content in TAURI_SIGNING_PRIVATE_KEY secret.
+          # Store the matching public key PEM in tauri.conf.json plugins.updater.pubkey.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ needs.release.outputs.tag_name }}
           releaseName: "In The Loop ${{ needs.release.outputs.tag_name }}"
           releaseBody: "See the assets to download and install this version."
           releaseDraft: false
           prerelease: false
+          # Generate and upload latest.json (the update manifest) + .sig files.
+          # latest.json is uploaded to the release as a top-level asset, which is
+          # what the endpoint URL in tauri.conf.json resolves to:
+          #   .../releases/latest/download/latest.json
+          uploadUpdaterJson: true
+          uploadUpdaterSignatures: true
           args: ${{ matrix.args }}
