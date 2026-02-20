@@ -4,6 +4,19 @@ A **local-only desktop application** for macOS that helps you stay "in the loop"
 
 ![In The Loop Dashboard](docs/screenshot-placeholder.png)
 
+## Installing and Opening
+
+Download the latest `.dmg` from [Releases](https://github.com/marek-szkudelski/in-the-loop/releases), open it, and drag **InTheLoop** to your Applications folder.
+
+On first launch macOS will block the app because it is not notarized. To open it:
+
+1. Find **InTheLoop** in Finder (e.g. in `/Applications`)
+2. Hold **Ctrl** and **left-click** the app icon
+3. Select **Open** from the context menu
+4. In the dialog that appears, click **Open**
+
+macOS remembers this choice — subsequent launches work normally.
+
 ## Features
 
 - 🔔 **System Tray Integration** - Lives in your macOS menu bar

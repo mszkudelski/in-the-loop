@@ -4,12 +4,26 @@
 use in_the_loop_lib::{commands, db, local_server, polling, tray};
 use std::sync::Arc;
 use tauri::{Manager, WindowEvent};
+use tokio::sync::Mutex;
 
 fn main() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_process::init());
+
+    // Register the updater plugin on desktop only
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
+    builder
         .setup(|app| {
+            // Manage PendingUpdate state (desktop only)
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            app.manage(in_the_loop_lib::updater::PendingUpdate(Mutex::new(None)));
+
             // Setup database
             let app_dir = app
                 .path()
@@ -37,7 +51,8 @@ fn main() {
             });
 
             // Start polling manager
-            let polling_manager = polling::PollingManager::new(database.clone(), app.handle().clone());
+            let polling_manager =
+                polling::PollingManager::new(database.clone(), app.handle().clone());
             tauri::async_runtime::spawn(async move {
                 polling_manager.start().await;
             });
@@ -76,6 +91,8 @@ fn main() {
             commands::save_setting,
             commands::get_setting,
             commands::open_url,
+            in_the_loop_lib::updater::fetch_update,
+            in_the_loop_lib::updater::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

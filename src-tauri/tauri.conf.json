@@ -31,7 +31,9 @@
           "permissions": [
             "core:default",
             "shell:allow-open",
-            "notification:default"
+            "notification:default",
+            "updater:default",
+            "process:allow-restart"
           ]
         }
       ]
@@ -41,6 +43,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -55,6 +58,12 @@
   "plugins": {
     "shell": {
       "open": true
+    },
+    "updater": {
+	    "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE0NUFCQ0M3MzBDN0E3NzAKUldSd3A4Y3d4N3hhcE1pbWpmakxkb1hmYVFQVURrWi9SWTNIbFJlbGhtUktQaWUzLzZNMVlOZXcK",
+      "endpoints": [
+        "https://github.com/mszkudelski/in-the-loop/releases/latest/download/latest.json"
+      ]
     }
   }
 }
