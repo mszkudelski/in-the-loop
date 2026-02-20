@@ -1,6 +1,6 @@
 {
   "name": "in-the-loop",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Local-only desktop app for macOS to stay in the loop on async work items",
   "type": "module",
   "scripts": {
