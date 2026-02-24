@@ -282,8 +282,9 @@ impl Database {
 
     pub fn get_copilot_session_ids(&self) -> Result<Vec<String>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt =
-            conn.prepare("SELECT metadata FROM items WHERE type = 'copilot_agent'")?;
+        let mut stmt = conn.prepare(
+            "SELECT metadata FROM items WHERE type IN ('copilot_agent', 'cli_session')",
+        )?;
         let ids = stmt
             .query_map([], |row| {
                 let meta: String = row.get(0)?;

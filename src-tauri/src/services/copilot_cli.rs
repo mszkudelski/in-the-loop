@@ -191,6 +191,15 @@ pub fn detect_session_activity(session_id: &str) -> SessionActivity {
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
+    // Check if a tool execution is actually waiting for user input (e.g. ask_user)
+    let is_user_input_tool = event_type == "tool.execution_start"
+        && last_event
+            .get("data")
+            .and_then(|d| d.get("toolName"))
+            .and_then(|v| v.as_str())
+            .map(|name| name == "ask_user" || name == "askUser")
+            .unwrap_or(false);
+
     let is_stale = last_event
         .get("timestamp")
         .and_then(|v| v.as_str())
@@ -202,6 +211,15 @@ pub fn detect_session_activity(session_id: &str) -> SessionActivity {
         .unwrap_or(true);
 
     match event_type {
+        // tool.execution_start for ask_user means waiting for user input
+        "tool.execution_start" if is_user_input_tool => {
+            if is_stale {
+                SessionActivity::Idle
+            } else {
+                SessionActivity::InputNeeded
+            }
+        }
+
         // Agent is actively generating/working
         "assistant.turn_start" | "assistant.message" | "tool.execution_start"
         | "tool.execution_complete" | "subagent.started" | "subagent.completed"
