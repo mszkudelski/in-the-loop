@@ -3,6 +3,19 @@ use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::PathBuf;
 
+const MAX_TITLE_LEN: usize = 80;
+
+/// Truncate a title to MAX_TITLE_LEN chars, appending "…" if trimmed.
+pub fn truncate_title(s: &str) -> String {
+    let trimmed = s.trim();
+    if trimmed.chars().count() <= MAX_TITLE_LEN {
+        trimmed.to_string()
+    } else {
+        let truncated: String = trimmed.chars().take(MAX_TITLE_LEN - 1).collect();
+        format!("{}…", truncated)
+    }
+}
+
 /// Detected runtime status of a Copilot CLI session.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SessionActivity {
@@ -160,7 +173,9 @@ pub fn find_session_by_cwd(cwd: &str) -> Option<CopilotSession> {
 ///
 /// Strategy: read the last few lines of events.jsonl (tail) and check the
 /// last event type to determine if the session is actively working, waiting
-/// for input, or idle.
+/// for input, or idle. Considers staleness: if the last event is older than
+/// 1 hour, an `assistant.turn_end` is treated as Idle (completed) rather
+/// than InputNeeded.
 pub fn detect_session_activity(session_id: &str) -> SessionActivity {
     let base = match session_state_dir() {
         Some(p) => p,
@@ -178,23 +193,63 @@ pub fn detect_session_activity(session_id: &str) -> SessionActivity {
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
+    let is_stale = last_event
+        .get("timestamp")
+        .and_then(|v| v.as_str())
+        .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
+        .map(|ts| {
+            let age = chrono::Utc::now().signed_duration_since(ts);
+            age > chrono::Duration::hours(1)
+        })
+        .unwrap_or(true);
+
     match event_type {
         // Agent is actively generating/working
         "assistant.turn_start" | "assistant.message" | "tool.execution_start"
         | "tool.execution_complete" | "subagent.started" | "session.mode_changed"
-        | "session.context_changed" => SessionActivity::InProgress,
+        | "session.context_changed" => {
+            if is_stale {
+                SessionActivity::Idle
+            } else {
+                SessionActivity::InProgress
+            }
+        }
 
-        // Agent finished a turn — waiting for user
-        "assistant.turn_end" => SessionActivity::InputNeeded,
+        // Agent finished a turn — waiting for user (or idle if stale)
+        "assistant.turn_end" => {
+            if is_stale {
+                SessionActivity::Idle
+            } else {
+                SessionActivity::InputNeeded
+            }
+        }
 
         // User just sent a message — agent will start soon
-        "user.message" => SessionActivity::InProgress,
+        "user.message" => {
+            if is_stale {
+                SessionActivity::Idle
+            } else {
+                SessionActivity::InProgress
+            }
+        }
 
         // Session just started or other info events
-        "session.start" | "session.info" => SessionActivity::InProgress,
+        "session.start" | "session.info" => {
+            if is_stale {
+                SessionActivity::Idle
+            } else {
+                SessionActivity::InProgress
+            }
+        }
 
         // Subagent completed — still part of agent turn
-        "subagent.completed" => SessionActivity::InProgress,
+        "subagent.completed" => {
+            if is_stale {
+                SessionActivity::Idle
+            } else {
+                SessionActivity::InProgress
+            }
+        }
 
         _ => SessionActivity::Idle,
     }
@@ -224,12 +279,7 @@ pub fn first_user_message(session_id: &str) -> Option<String> {
                 .and_then(|c| c.as_str())
                 .unwrap_or("");
             if !content.is_empty() {
-                // Truncate to a reasonable title length
-                let trimmed = content.trim();
-                if trimmed.len() > 80 {
-                    return Some(format!("{}…", &trimmed[..77]));
-                }
-                return Some(trimmed.to_string());
+                return Some(truncate_title(content));
             }
         }
     }

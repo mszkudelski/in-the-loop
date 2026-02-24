@@ -527,7 +527,7 @@ impl PollingManager {
             // Auto-name: summary > first user message > repository > generic
             let title = session
                 .display_name()
-                .map(|s| s.to_string())
+                .map(|s| copilot_cli::truncate_title(s))
                 .or_else(|| copilot_cli::first_user_message(&session.id))
                 .or_else(|| {
                     session.repository.as_ref().map(|r| format!("Session in {}", r))
@@ -598,7 +598,7 @@ impl PollingManager {
         // Update title: summary > first user message > keep current
         let best_name = session
             .display_name()
-            .map(|s| s.to_string())
+            .map(|s| copilot_cli::truncate_title(s))
             .or_else(|| copilot_cli::first_user_message(session_id));
 
         if let Some(name) = &best_name {
@@ -675,7 +675,7 @@ impl PollingManager {
 
                 let best_name = session
                     .display_name()
-                    .map(|s| s.to_string())
+                    .map(|s| copilot_cli::truncate_title(s))
                     .or_else(|| copilot_cli::first_user_message(sid));
                 if let Some(name) = &best_name {
                     if !name.is_empty() && *name != item.title {
@@ -724,7 +724,7 @@ impl PollingManager {
         if let Some(session) = session {
             let best_name = session
                 .display_name()
-                .map(|s| s.to_string())
+                .map(|s| copilot_cli::truncate_title(s))
                 .or_else(|| copilot_cli::first_user_message(&session.id));
             if let Some(name) = &best_name {
                 if !name.is_empty() && *name != item.title {
