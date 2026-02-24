@@ -731,6 +731,15 @@ impl PollingManager {
                     db.update_item_title(&item.id, name)?;
                 }
             }
+
+            // Detect live status from events.jsonl on first match
+            let activity = copilot_cli::detect_session_activity(&session.id);
+            let new_status = match activity {
+                copilot_cli::SessionActivity::InProgress => "in_progress",
+                copilot_cli::SessionActivity::InputNeeded => "input_needed",
+                copilot_cli::SessionActivity::Idle => "completed",
+            };
+
             let mut new_meta = metadata.clone();
             if let Some(map) = new_meta.as_object_mut() {
                 map.insert(
@@ -744,7 +753,7 @@ impl PollingManager {
                 );
                 map.insert("branch".to_string(), serde_json::json!(session.branch));
             }
-            db.update_item_status(&item.id, &item.status, Some(&new_meta.to_string()))?;
+            db.update_item_status(&item.id, new_status, Some(&new_meta.to_string()))?;
         } else {
             db.touch_item_check(&item.id)?;
         }

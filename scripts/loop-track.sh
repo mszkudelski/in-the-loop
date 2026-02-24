@@ -41,10 +41,11 @@ log_indicates_copilot_waiting() {
   [ "$has_idle_prompt" -eq 1 ] && [ "$has_activity" -eq 1 ]
 }
 
-# Register session
+# Register session (include cwd for copilot session matching)
+CWD="$(pwd)"
 RESPONSE=$(curl -s -X POST "http://localhost:$LOOP_TRACKER_PORT/api/sessions" \
   -H "Content-Type: application/json" \
-  -d "{\"command\": \"$COMMAND\", \"title\": \"$TITLE\"}")
+  -d "{\"command\": \"$COMMAND\", \"title\": \"$TITLE\", \"cwd\": \"$CWD\"}")
 
 SESSION_ID=$(echo "$RESPONSE" | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
 
@@ -54,56 +55,38 @@ if [ -z "$SESSION_ID" ] || [ "$SESSION_ID" = "error" ]; then
 fi
 
 # For interactive Copilot sessions, preserve TTY while capturing output
-# via `script`, then auto-mark complete when Copilot indicates it is
-# waiting for next user input.
-AUTO_COMPLETED=0
+# via `script`. Status detection is handled by the app's polling system
+# through events.jsonl, so no log monitoring is needed here.
 
 if is_interactive_copilot_command "$COMMAND"; then
-  OUTPUT_LOG=$(mktemp)
-  AUTO_COMPLETE_FLAG=$(mktemp)
-  touch "$OUTPUT_LOG"
-  echo "0" > "$AUTO_COMPLETE_FLAG"
-
-  while true; do
-    if [ "$(cat "$AUTO_COMPLETE_FLAG")" = "0" ] && log_indicates_copilot_waiting "$OUTPUT_LOG"; then
-      update_session_status "$SESSION_ID" "completed"
-      echo "1" > "$AUTO_COMPLETE_FLAG"
-      break
-    fi
-    sleep 1
-  done &
-  MONITOR_PID=$!
+  # Update to in_progress immediately
+  update_session_status "$SESSION_ID" "in_progress"
 
   if command -v script >/dev/null 2>&1; then
+    OUTPUT_LOG=$(mktemp)
     USER_SHELL="${SHELL:-/bin/zsh}"
     script -q "$OUTPUT_LOG" "$USER_SHELL" -ic "$COMMAND"
     EXIT_CODE=$?
+    rm -f "$OUTPUT_LOG"
   else
     eval "$COMMAND"
     EXIT_CODE=$?
   fi
-
-  kill "$MONITOR_PID" 2>/dev/null || true
-
-  if [ "$(cat "$AUTO_COMPLETE_FLAG")" = "1" ]; then
-    AUTO_COMPLETED=1
-  fi
-
-  rm -f "$OUTPUT_LOG" "$AUTO_COMPLETE_FLAG"
 else
   eval "$COMMAND"
   EXIT_CODE=$?
 fi
 
 # Update status
-if [ $AUTO_COMPLETED -eq 1 ]; then
-  STATUS="completed"
+# For interactive Copilot sessions, let the app's polling system manage status
+# via events.jsonl detection. Only set final status for non-copilot commands.
+if is_interactive_copilot_command "$COMMAND"; then
+  # Don't override — polling detects in_progress/input_needed/completed from events.jsonl
+  :
 elif [ $EXIT_CODE -eq 0 ]; then
-  STATUS="completed"
+  update_session_status "$SESSION_ID" "completed"
 else
-  STATUS="failed"
+  update_session_status "$SESSION_ID" "failed"
 fi
-
-update_session_status "$SESSION_ID" "$STATUS"
 
 exit $EXIT_CODE
