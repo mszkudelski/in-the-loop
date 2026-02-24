@@ -722,6 +722,12 @@ impl PollingManager {
             .or_else(|| copilot_cli::find_session_by_time(&item.created_at));
 
         if let Some(session) = session {
+            // Remove any duplicate copilot_agent entry for this session
+            let removed = db.remove_copilot_agent_by_session_id(&session.id)?;
+            for removed_id in &removed {
+                let _ = app_handle.emit("item-updated", removed_id);
+            }
+
             let best_name = session
                 .display_name()
                 .map(|s| copilot_cli::truncate_title(s))

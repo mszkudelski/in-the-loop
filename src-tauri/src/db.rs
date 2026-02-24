@@ -280,6 +280,41 @@ impl Database {
         Ok(ids)
     }
 
+    /// Remove any copilot_agent items that track the given copilot session id.
+    /// Used when a cli_session claims the same session to avoid duplicates.
+    pub fn remove_copilot_agent_by_session_id(&self, copilot_session_id: &str) -> Result<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        // Find matching copilot_agent item ids
+        let mut stmt = conn.prepare(
+            "SELECT id, metadata FROM items WHERE type = 'copilot_agent'",
+        )?;
+        let ids_to_remove: Vec<String> = stmt
+            .query_map([], |row| {
+                let id: String = row.get(0)?;
+                let meta: String = row.get(1)?;
+                Ok((id, meta))
+            })?
+            .filter_map(|r| {
+                r.ok().and_then(|(id, meta_str)| {
+                    serde_json::from_str::<serde_json::Value>(&meta_str)
+                        .ok()
+                        .and_then(|v| {
+                            if v["copilot_session_id"].as_str() == Some(copilot_session_id) {
+                                Some(id)
+                            } else {
+                                None
+                            }
+                        })
+                })
+            })
+            .collect();
+
+        for id in &ids_to_remove {
+            conn.execute("DELETE FROM items WHERE id = ?1", params![id])?;
+        }
+        Ok(ids_to_remove)
+    }
+
     pub fn get_copilot_session_ids(&self) -> Result<Vec<String>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
