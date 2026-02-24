@@ -171,11 +171,9 @@ pub fn find_session_by_cwd(cwd: &str) -> Option<CopilotSession> {
 
 /// Determine the live activity status of a session by reading events.jsonl.
 ///
-/// Strategy: read the last few lines of events.jsonl (tail) and check the
-/// last event type to determine if the session is actively working, waiting
-/// for input, or idle. Considers staleness: if the last event is older than
-/// 1 hour, an `assistant.turn_end` is treated as Idle (completed) rather
-/// than InputNeeded.
+/// Strategy: read the last event from events.jsonl and check its type.
+/// Considers staleness: if the last event is older than 5 minutes, the
+/// session is treated as Idle (completed) regardless of event type.
 pub fn detect_session_activity(session_id: &str) -> SessionActivity {
     let base = match session_state_dir() {
         Some(p) => p,
@@ -199,15 +197,15 @@ pub fn detect_session_activity(session_id: &str) -> SessionActivity {
         .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
         .map(|ts| {
             let age = chrono::Utc::now().signed_duration_since(ts);
-            age > chrono::Duration::hours(1)
+            age > chrono::Duration::minutes(5)
         })
         .unwrap_or(true);
 
     match event_type {
         // Agent is actively generating/working
         "assistant.turn_start" | "assistant.message" | "tool.execution_start"
-        | "tool.execution_complete" | "subagent.started" | "session.mode_changed"
-        | "session.context_changed" => {
+        | "tool.execution_complete" | "subagent.started" | "subagent.completed"
+        | "session.mode_changed" | "session.context_changed" => {
             if is_stale {
                 SessionActivity::Idle
             } else {
@@ -233,8 +231,8 @@ pub fn detect_session_activity(session_id: &str) -> SessionActivity {
             }
         }
 
-        // Session just started or other info events
-        "session.start" | "session.info" => {
+        // Session lifecycle events
+        "session.start" | "session.info" | "session.model_change" => {
             if is_stale {
                 SessionActivity::Idle
             } else {
@@ -242,14 +240,8 @@ pub fn detect_session_activity(session_id: &str) -> SessionActivity {
             }
         }
 
-        // Subagent completed — still part of agent turn
-        "subagent.completed" => {
-            if is_stale {
-                SessionActivity::Idle
-            } else {
-                SessionActivity::InProgress
-            }
-        }
+        // Session error — treat as idle
+        "session.error" => SessionActivity::Idle,
 
         _ => SessionActivity::Idle,
     }
