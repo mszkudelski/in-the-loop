@@ -35,8 +35,8 @@ function getOpenCodeSessionUrl(item: Item): string | null {
 }
 
 function getLastActivity(item: Item): string | number | undefined {
-  if (item.type === 'opencode_session' && item.metadata?.last_activity) {
-    return item.metadata.last_activity;
+  if (item.type === 'opencode_session' || item.type === 'cli_session' || item.type === 'copilot_agent') {
+    return item.metadata?.last_activity || undefined;
   }
   return item.last_updated_at || item.last_checked_at;
 }

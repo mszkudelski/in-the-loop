@@ -312,6 +312,18 @@ pub fn first_user_message(session_id: &str) -> Option<String> {
     None
 }
 
+/// Get the timestamp of the last event in events.jsonl for a session.
+pub fn last_event_timestamp(session_id: &str) -> Option<String> {
+    let base = session_state_dir()?;
+    let events_file = base.join(session_id).join("events.jsonl");
+    let events = read_tail_events(&events_file, 1)?;
+    events
+        .last()
+        .and_then(|e| e.get("timestamp"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
 /// Read the last N valid JSON events from an events.jsonl file.
 /// Uses a tail-read approach for efficiency.
 fn read_tail_events(path: &PathBuf, count: usize) -> Option<Vec<serde_json::Value>> {

@@ -608,12 +608,14 @@ impl PollingManager {
         }
 
         // Update metadata
+        let last_activity = copilot_cli::last_event_timestamp(session_id);
         let new_metadata = serde_json::json!({
             "copilot_session_id": session.id,
             "cwd": session.cwd,
             "repository": session.repository,
             "branch": session.branch,
             "summary": session.summary,
+            "last_activity": last_activity,
         });
         let new_metadata_str = serde_json::to_string(&new_metadata)?;
 
@@ -688,6 +690,10 @@ impl PollingManager {
                     map.insert("summary".to_string(), serde_json::json!(session.summary));
                     map.insert("repository".to_string(), serde_json::json!(session.repository));
                     map.insert("branch".to_string(), serde_json::json!(session.branch));
+                    let ts = copilot_cli::last_event_timestamp(sid);
+                    if let Some(ts) = ts {
+                        map.insert("last_activity".to_string(), serde_json::json!(ts));
+                    }
                 }
                 db.update_item_status(&item.id, new_status, Some(&new_meta.to_string()))?;
 
@@ -758,6 +764,9 @@ impl PollingManager {
                     serde_json::json!(session.repository),
                 );
                 map.insert("branch".to_string(), serde_json::json!(session.branch));
+                if let Some(ts) = copilot_cli::last_event_timestamp(&session.id) {
+                    map.insert("last_activity".to_string(), serde_json::json!(ts));
+                }
             }
             db.update_item_status(&item.id, new_status, Some(&new_meta.to_string()))?;
         } else {
