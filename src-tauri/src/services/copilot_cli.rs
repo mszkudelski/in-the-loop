@@ -1,0 +1,269 @@
+use std::collections::HashMap;
+use std::fs;
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::path::PathBuf;
+
+/// Detected runtime status of a Copilot CLI session.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SessionActivity {
+    /// Agent is actively working (tool calls, generating responses).
+    InProgress,
+    /// Agent finished its turn and is waiting for user input.
+    InputNeeded,
+    /// Session appears idle / no recent activity.
+    Idle,
+}
+
+#[derive(Debug, Clone)]
+pub struct CopilotSession {
+    pub id: String,
+    pub name: Option<String>,
+    pub summary: Option<String>,
+    pub cwd: Option<String>,
+    pub repository: Option<String>,
+    pub branch: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+impl CopilotSession {
+    /// Returns the best display name: explicit name > summary > None
+    pub fn display_name(&self) -> Option<&str> {
+        self.name
+            .as_deref()
+            .or(self.summary.as_deref())
+    }
+}
+
+fn session_state_dir() -> Option<PathBuf> {
+    let home = std::env::var("HOME").ok()?;
+    Some(PathBuf::from(home).join(".copilot").join("session-state"))
+}
+
+fn parse_workspace_yaml(content: &str) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for line in content.lines() {
+        if let Some((key, value)) = line.split_once(": ") {
+            map.insert(key.trim().to_string(), value.trim().to_string());
+        }
+    }
+    map
+}
+
+pub fn discover_sessions() -> Vec<CopilotSession> {
+    let base = match session_state_dir() {
+        Some(p) if p.is_dir() => p,
+        _ => return vec![],
+    };
+
+    let mut sessions = Vec::new();
+
+    let entries = match fs::read_dir(&base) {
+        Ok(e) => e,
+        Err(_) => return vec![],
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let workspace_file = path.join("workspace.yaml");
+        if !workspace_file.exists() {
+            continue;
+        }
+
+        let content = match fs::read_to_string(&workspace_file) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        let fields = parse_workspace_yaml(&content);
+
+        let id = match fields.get("id") {
+            Some(id) => id.clone(),
+            None => continue,
+        };
+
+        sessions.push(CopilotSession {
+            id,
+            name: fields.get("name").cloned().filter(|s| !s.is_empty()),
+            summary: fields.get("summary").cloned().filter(|s| !s.is_empty()),
+            cwd: fields.get("cwd").cloned(),
+            repository: fields.get("repository").cloned(),
+            branch: fields.get("branch").cloned(),
+            created_at: fields.get("created_at").cloned(),
+            updated_at: fields.get("updated_at").cloned(),
+        });
+    }
+
+    sessions
+}
+
+pub fn read_session(session_id: &str) -> Option<CopilotSession> {
+    let base = session_state_dir()?;
+    let workspace_file = base.join(session_id).join("workspace.yaml");
+    let content = fs::read_to_string(&workspace_file).ok()?;
+    let fields = parse_workspace_yaml(&content);
+    let id = fields.get("id")?.clone();
+
+    Some(CopilotSession {
+        id,
+        name: fields.get("name").cloned().filter(|s| !s.is_empty()),
+        summary: fields.get("summary").cloned().filter(|s| !s.is_empty()),
+        cwd: fields.get("cwd").cloned(),
+        repository: fields.get("repository").cloned(),
+        branch: fields.get("branch").cloned(),
+        created_at: fields.get("created_at").cloned(),
+        updated_at: fields.get("updated_at").cloned(),
+    })
+}
+
+/// Find a Copilot CLI session whose created_at is closest to the given
+/// timestamp (within a 2-minute window).
+pub fn find_session_by_time(created_at: &str) -> Option<CopilotSession> {
+    let target = chrono::DateTime::parse_from_rfc3339(created_at).ok()?;
+    let sessions = discover_sessions();
+    let max_delta = chrono::Duration::seconds(15);
+
+    sessions
+        .into_iter()
+        .filter_map(|s| {
+            let t = chrono::DateTime::parse_from_rfc3339(s.created_at.as_deref()?).ok()?;
+            let delta = (t - target).abs();
+            if delta <= max_delta {
+                Some((s, delta))
+            } else {
+                None
+            }
+        })
+        .min_by_key(|(_, delta)| *delta)
+        .map(|(s, _)| s)
+}
+
+/// Find the most recently updated Copilot CLI session matching the given cwd.
+pub fn find_session_by_cwd(cwd: &str) -> Option<CopilotSession> {
+    let sessions = discover_sessions();
+
+    sessions
+        .into_iter()
+        .filter(|s| s.cwd.as_deref() == Some(cwd))
+        .max_by(|a, b| {
+            let ta = a.updated_at.as_deref().unwrap_or("");
+            let tb = b.updated_at.as_deref().unwrap_or("");
+            ta.cmp(tb)
+        })
+}
+
+/// Determine the live activity status of a session by reading events.jsonl.
+///
+/// Strategy: read the last few lines of events.jsonl (tail) and check the
+/// last event type to determine if the session is actively working, waiting
+/// for input, or idle.
+pub fn detect_session_activity(session_id: &str) -> SessionActivity {
+    let base = match session_state_dir() {
+        Some(p) => p,
+        None => return SessionActivity::Idle,
+    };
+
+    let events_file = base.join(session_id).join("events.jsonl");
+    let last_event = match read_last_json_event(&events_file) {
+        Some(e) => e,
+        None => return SessionActivity::Idle,
+    };
+
+    let event_type = last_event
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    match event_type {
+        // Agent is actively generating/working
+        "assistant.turn_start" | "assistant.message" | "tool.execution_start"
+        | "tool.execution_complete" | "subagent.started" | "session.mode_changed"
+        | "session.context_changed" => SessionActivity::InProgress,
+
+        // Agent finished a turn — waiting for user
+        "assistant.turn_end" => SessionActivity::InputNeeded,
+
+        // User just sent a message — agent will start soon
+        "user.message" => SessionActivity::InProgress,
+
+        // Session just started or other info events
+        "session.start" | "session.info" => SessionActivity::InProgress,
+
+        // Subagent completed — still part of agent turn
+        "subagent.completed" => SessionActivity::InProgress,
+
+        _ => SessionActivity::Idle,
+    }
+}
+
+/// Extract the first user message content from events.jsonl.
+/// Useful for auto-generating a session title.
+pub fn first_user_message(session_id: &str) -> Option<String> {
+    let base = session_state_dir()?;
+    let events_file = base.join(session_id).join("events.jsonl");
+    let file = fs::File::open(&events_file).ok()?;
+    let reader = BufReader::new(file);
+
+    for line in reader.lines().take(50) {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        let obj: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if obj.get("type").and_then(|v| v.as_str()) == Some("user.message") {
+            let content = obj
+                .get("data")
+                .and_then(|d| d.get("content"))
+                .and_then(|c| c.as_str())
+                .unwrap_or("");
+            if !content.is_empty() {
+                // Truncate to a reasonable title length
+                let trimmed = content.trim();
+                if trimmed.len() > 80 {
+                    return Some(format!("{}…", &trimmed[..77]));
+                }
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Read the last valid JSON line from an events.jsonl file.
+/// Uses a tail-read approach for efficiency.
+fn read_last_json_event(path: &PathBuf) -> Option<serde_json::Value> {
+    let mut file = fs::File::open(path).ok()?;
+    let file_len = file.metadata().ok()?.len();
+
+    if file_len == 0 {
+        return None;
+    }
+
+    // Read the last 8KB — enough for several events
+    let read_size = std::cmp::min(file_len, 8192);
+    let start = file_len - read_size;
+    file.seek(SeekFrom::Start(start)).ok()?;
+
+    let mut buf = String::new();
+    file.read_to_string(&mut buf).ok()?;
+
+    // Parse lines in reverse to find the last valid JSON
+    for line in buf.lines().rev() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            return Some(val);
+        }
+    }
+
+    None
+}

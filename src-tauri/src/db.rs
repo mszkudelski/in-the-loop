@@ -280,6 +280,26 @@ impl Database {
         Ok(ids)
     }
 
+    pub fn get_copilot_session_ids(&self) -> Result<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt =
+            conn.prepare("SELECT metadata FROM items WHERE type = 'copilot_agent'")?;
+        let ids = stmt
+            .query_map([], |row| {
+                let meta: String = row.get(0)?;
+                Ok(meta)
+            })?
+            .filter_map(|m| {
+                m.ok().and_then(|meta_str| {
+                    serde_json::from_str::<serde_json::Value>(&meta_str)
+                        .ok()
+                        .and_then(|v| v["copilot_session_id"].as_str().map(|s| s.to_string()))
+                })
+            })
+            .collect();
+        Ok(ids)
+    }
+
     pub fn save_credential(&self, key: &str, value: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
