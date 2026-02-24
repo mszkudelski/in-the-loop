@@ -171,9 +171,11 @@ pub fn find_session_by_cwd(cwd: &str) -> Option<CopilotSession> {
 
 /// Determine the live activity status of a session by reading events.jsonl.
 ///
-/// Strategy: read the last event from events.jsonl and check its type.
-/// Considers staleness: if the last event is older than 5 minutes, the
-/// session is treated as Idle (completed) regardless of event type.
+/// Strategy: read the tail of events.jsonl and check event types.
+/// - `task_complete` tool in recent events → Idle (completed)
+/// - `ask_user` tool pending → InputNeeded
+/// - `assistant.turn_end` → InputNeeded (or Idle if >2 min old)
+/// - Other events → InProgress (or Idle if >2 min old)
 pub fn detect_session_activity(session_id: &str) -> SessionActivity {
     let base = match session_state_dir() {
         Some(p) => p,
@@ -181,10 +183,24 @@ pub fn detect_session_activity(session_id: &str) -> SessionActivity {
     };
 
     let events_file = base.join(session_id).join("events.jsonl");
-    let last_event = match read_last_json_event(&events_file) {
-        Some(e) => e,
-        None => return SessionActivity::Idle,
+    let recent_events = match read_tail_events(&events_file, 10) {
+        Some(e) if !e.is_empty() => e,
+        _ => return SessionActivity::Idle,
     };
+
+    // Check if task_complete was called in recent events → session is done
+    let has_task_complete = recent_events.iter().any(|e| {
+        e.get("type").and_then(|v| v.as_str()) == Some("tool.execution_start")
+            && e.get("data")
+                .and_then(|d| d.get("toolName"))
+                .and_then(|v| v.as_str())
+                == Some("task_complete")
+    });
+    if has_task_complete {
+        return SessionActivity::Idle;
+    }
+
+    let last_event = &recent_events[recent_events.len() - 1];
 
     let event_type = last_event
         .get("type")
@@ -206,7 +222,7 @@ pub fn detect_session_activity(session_id: &str) -> SessionActivity {
         .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
         .map(|ts| {
             let age = chrono::Utc::now().signed_duration_since(ts);
-            age > chrono::Duration::minutes(5)
+            age > chrono::Duration::minutes(2)
         })
         .unwrap_or(true);
 
@@ -296,9 +312,9 @@ pub fn first_user_message(session_id: &str) -> Option<String> {
     None
 }
 
-/// Read the last valid JSON line from an events.jsonl file.
+/// Read the last N valid JSON events from an events.jsonl file.
 /// Uses a tail-read approach for efficiency.
-fn read_last_json_event(path: &PathBuf) -> Option<serde_json::Value> {
+fn read_tail_events(path: &PathBuf, count: usize) -> Option<Vec<serde_json::Value>> {
     let mut file = fs::File::open(path).ok()?;
     let file_len = file.metadata().ok()?.len();
 
@@ -306,24 +322,32 @@ fn read_last_json_event(path: &PathBuf) -> Option<serde_json::Value> {
         return None;
     }
 
-    // Read the last 8KB — enough for several events
-    let read_size = std::cmp::min(file_len, 8192);
+    // Read the last 16KB — enough for many events
+    let read_size = std::cmp::min(file_len, 16384);
     let start = file_len - read_size;
     file.seek(SeekFrom::Start(start)).ok()?;
 
     let mut buf = String::new();
     file.read_to_string(&mut buf).ok()?;
 
-    // Parse lines in reverse to find the last valid JSON
+    let mut events = Vec::new();
     for line in buf.lines().rev() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
         if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
-            return Some(val);
+            events.push(val);
+            if events.len() >= count {
+                break;
+            }
         }
     }
 
-    None
+    events.reverse();
+    if events.is_empty() {
+        None
+    } else {
+        Some(events)
+    }
 }
