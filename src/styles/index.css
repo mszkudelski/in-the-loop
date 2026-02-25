@@ -165,6 +165,12 @@ button:focus-visible {
   user-select: none;
 }
 
+.btn-archive-old {
+  font-size: 0.75rem;
+  padding: 0.18rem 0.45rem;
+  margin-left: auto;
+}
+
 .filter-toggle input[type="checkbox"] {
   width: 13px;
   height: 13px;

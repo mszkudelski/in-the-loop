@@ -35,6 +35,15 @@ impl PollingManager {
                     eprintln!("Error polling items: {}", e);
                 }
 
+                // Cleanup archived items older than 7 days
+                match db.cleanup_old_archived() {
+                    Ok(count) if count > 0 => {
+                        eprintln!("Cleaned up {} old archived items", count);
+                    }
+                    Err(e) => eprintln!("Error cleaning up archived items: {}", e),
+                    _ => {}
+                }
+
                 tray::update_tray_badge(&app_handle, &db);
                 tray::rebuild_tray_menu(&app_handle, &db);
 
@@ -382,6 +391,7 @@ impl PollingManager {
                     last_updated_at: None,
                     created_at: chrono::Utc::now().to_rfc3339(),
                     archived: false,
+                    archived_at: None,
                     polling_interval_override: None,
                     checked: status_str == "archived",
                 };
@@ -558,6 +568,7 @@ impl PollingManager {
                     .created_at
                     .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
                 archived: false,
+                archived_at: None,
                 polling_interval_override: None,
                 checked: false,
             };

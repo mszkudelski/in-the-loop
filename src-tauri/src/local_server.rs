@@ -77,6 +77,7 @@ async fn create_session(
         last_updated_at: Some(now.clone()),
         created_at: now,
         archived: false,
+        archived_at: None,
         polling_interval_override: None,
         checked: false,
     };

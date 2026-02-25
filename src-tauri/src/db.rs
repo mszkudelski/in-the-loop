@@ -18,6 +18,7 @@ pub struct Item {
     pub last_updated_at: Option<String>,
     pub created_at: String,
     pub archived: bool,
+    pub archived_at: Option<String>,
     pub polling_interval_override: Option<i64>,
     pub checked: bool,
 }
@@ -73,6 +74,15 @@ impl Database {
             )?;
         }
 
+        // Migration: add archived_at column if missing
+        let has_archived_at = conn.prepare("SELECT archived_at FROM items LIMIT 0").is_ok();
+        if !has_archived_at {
+            conn.execute(
+                "ALTER TABLE items ADD COLUMN archived_at TEXT",
+                [],
+            )?;
+        }
+
         conn.execute(
             "CREATE TABLE IF NOT EXISTS credentials (
                 key TEXT PRIMARY KEY,
@@ -109,8 +119,8 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO items (id, type, title, url, status, previous_status, metadata, 
-                               last_checked_at, last_updated_at, created_at, archived, polling_interval_override, checked)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                               last_checked_at, last_updated_at, created_at, archived, polling_interval_override, checked, archived_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 item.id,
                 item.item_type,
@@ -125,6 +135,7 @@ impl Database {
                 item.archived as i32,
                 item.polling_interval_override,
                 item.checked as i32,
+                item.archived_at,
             ],
         )?;
         Ok(())
@@ -134,7 +145,7 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, type, title, url, status, previous_status, metadata,
-                    last_checked_at, last_updated_at, created_at, archived, polling_interval_override, checked
+                    last_checked_at, last_updated_at, created_at, archived, polling_interval_override, checked, archived_at
              FROM items WHERE archived = ?1 ORDER BY created_at DESC"
         )?;
 
@@ -154,6 +165,7 @@ impl Database {
                     archived: row.get::<_, i32>(10)? != 0,
                     polling_interval_override: row.get(11)?,
                     checked: row.get::<_, i32>(12)? != 0,
+                    archived_at: row.get(13)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -258,6 +270,59 @@ impl Database {
             params![checked as i32, id],
         )?;
         Ok(())
+    }
+
+    pub fn archive_item(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE items SET archived = 1, archived_at = ?1, checked = 0 WHERE id = ?2",
+            params![now, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn archive_items(&self, ids: &[String]) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        for id in ids {
+            conn.execute(
+                "UPDATE items SET archived = 1, archived_at = ?1, checked = 0 WHERE id = ?2",
+                params![now, id],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn unarchive_item(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE items SET archived = 0, archived_at = NULL WHERE id = ?1",
+            params![id],
+        )?;
+        Ok(())
+    }
+
+    pub fn cleanup_old_archived(&self) -> Result<u64> {
+        let conn = self.conn.lock().unwrap();
+        let cutoff = (chrono::Utc::now() - chrono::Duration::days(7)).to_rfc3339();
+        let count = conn.execute(
+            "DELETE FROM items WHERE archived = 1 AND archived_at IS NOT NULL AND archived_at < ?1",
+            params![cutoff],
+        )?;
+        Ok(count as u64)
+    }
+
+    pub fn archive_stale_items(&self, before: &str) -> Result<u64> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        let count = conn.execute(
+            "UPDATE items SET archived = 1, archived_at = ?1, checked = 0
+             WHERE archived = 0
+               AND COALESCE(last_updated_at, created_at) < ?2",
+            params![now, before],
+        )?;
+        Ok(count as u64)
     }
 
     pub fn get_opencode_session_ids(&self) -> Result<Vec<String>> {
@@ -382,7 +447,7 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, type, title, url, status, previous_status, metadata,
-                    last_checked_at, last_updated_at, created_at, archived, polling_interval_override, checked
+                    last_checked_at, last_updated_at, created_at, archived, polling_interval_override, checked, archived_at
              FROM items WHERE archived = 0 AND checked = 0 ORDER BY created_at DESC"
         )?;
 
@@ -402,6 +467,7 @@ impl Database {
                     archived: row.get::<_, i32>(10)? != 0,
                     polling_interval_override: row.get(11)?,
                     checked: row.get::<_, i32>(12)? != 0,
+                    archived_at: row.get(13)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

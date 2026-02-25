@@ -31,6 +31,7 @@ pub async fn add_item(
         last_updated_at: None,
         created_at: chrono::Utc::now().to_rfc3339(),
         archived: false,
+        archived_at: None,
         polling_interval_override: None,
         checked: false,
     };
@@ -50,6 +51,34 @@ pub async fn remove_item(id: String, app: AppHandle, state: State<'_, AppState>)
     state.db.remove_item(&id).map_err(|e| e.to_string())?;
     tray::refresh_tray(&app, &state.db);
     Ok(())
+}
+
+#[tauri::command]
+pub async fn archive_item(id: String, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    state.db.archive_item(&id).map_err(|e| e.to_string())?;
+    tray::refresh_tray(&app, &state.db);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn archive_items(ids: Vec<String>, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    state.db.archive_items(&ids).map_err(|e| e.to_string())?;
+    tray::refresh_tray(&app, &state.db);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn unarchive_item(id: String, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    state.db.unarchive_item(&id).map_err(|e| e.to_string())?;
+    tray::refresh_tray(&app, &state.db);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn archive_stale_items(before: String, app: AppHandle, state: State<'_, AppState>) -> Result<u64, String> {
+    let count = state.db.archive_stale_items(&before).map_err(|e| e.to_string())?;
+    tray::refresh_tray(&app, &state.db);
+    Ok(count)
 }
 
 #[tauri::command]

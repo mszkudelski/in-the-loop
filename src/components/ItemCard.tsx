@@ -4,8 +4,9 @@ import { invoke } from '@tauri-apps/api/core';
 
 interface ItemCardProps {
   item: Item;
-  onRemove: (id: string) => void;
-  onToggleChecked: (id: string, checked: boolean) => void;
+  isArchived: boolean;
+  onArchive: (id: string) => void;
+  onUnarchive: (id: string) => void;
 }
 
 function timeAgo(dateInput?: string | number): string {
@@ -41,7 +42,7 @@ function getLastActivity(item: Item): string | number | undefined {
   return item.last_updated_at || item.last_checked_at;
 }
 
-export function ItemCard({ item, onRemove, onToggleChecked }: ItemCardProps) {
+export function ItemCard({ item, isArchived, onArchive, onUnarchive }: ItemCardProps) {
   const typeName: Record<Item['type'], string> = {
     slack_thread: 'Slack',
     github_action: 'Action',
@@ -59,31 +60,12 @@ export function ItemCard({ item, onRemove, onToggleChecked }: ItemCardProps) {
     }
   };
 
-  const handleRemove = async () => {
-    try {
-      await invoke('remove_item', { id: item.id });
-      onRemove(item.id);
-    } catch (error) {
-      console.error('Failed to remove item:', error);
-    }
-  };
-
-  const handleCheck = () => {
-    onToggleChecked(item.id, !item.checked);
-  };
-
   const lastActivity = getLastActivity(item);
   const lastActivityStr = timeAgo(lastActivity);
   const hasLink = !!(getOpenCodeSessionUrl(item) || item.url);
 
   return (
-    <div className={`item-row ${item.checked ? 'item-checked' : ''}`}>
-      <input
-        type="checkbox"
-        className="item-checkbox"
-        checked={item.checked}
-        onChange={handleCheck}
-      />
+    <div className="item-row">
       <span className="type-badge">{typeName[item.type]}</span>
       <StatusBadge status={item.status} />
       {hasLink ? (
@@ -96,9 +78,11 @@ export function ItemCard({ item, onRemove, onToggleChecked }: ItemCardProps) {
       {lastActivityStr && (
         <span className="item-time">{lastActivityStr}</span>
       )}
-      <button className="btn-icon" onClick={handleRemove} title="Remove">
-        &times;
-      </button>
+      {isArchived ? (
+        <button className="btn-icon" onClick={() => onUnarchive(item.id)} title="Restore">↩</button>
+      ) : (
+        <button className="btn-icon" onClick={() => onArchive(item.id)} title="Archive">▼</button>
+      )}
     </div>
   );
 }
