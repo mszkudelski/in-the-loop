@@ -1,5 +1,5 @@
 use crate::db::{Database, Item};
-use crate::services::{github_actions, github_pr, opencode, slack, url_parser};
+use crate::services::{copilot_cli, github_actions, github_pr, opencode, slack, url_parser};
 use crate::tray;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -35,6 +35,15 @@ impl PollingManager {
                     eprintln!("Error polling items: {}", e);
                 }
 
+                // Cleanup archived items older than 7 days
+                match db.cleanup_old_archived() {
+                    Ok(count) if count > 0 => {
+                        eprintln!("Cleaned up {} old archived items", count);
+                    }
+                    Err(e) => eprintln!("Error cleaning up archived items: {}", e),
+                    _ => {}
+                }
+
                 tray::update_tray_badge(&app_handle, &db);
                 tray::rebuild_tray_menu(&app_handle, &db);
 
@@ -48,17 +57,23 @@ impl PollingManager {
             eprintln!("Error discovering OpenCode sessions: {}", e);
         }
 
+        if let Err(e) = Self::discover_copilot_sessions(db, app_handle) {
+            eprintln!("Error discovering Copilot CLI sessions: {}", e);
+        }
+
         let items = db.get_items(false)?;
 
         let opencode_statuses = Self::get_opencode_context(db).await;
 
         for item in items {
-            // Skip terminal items, but keep polling opencode_session
+            // Skip terminal items, but keep polling opencode_session and copilot_agent
             // (archived sessions need status tracking, idle sessions may become busy).
             // "failed" github_action/github_pr items are re-polled so they can recover
             // if the failure was due to a transient polling error.
             if (item.status == "completed" || item.status == "archived" || item.status == "merged")
                 && item.item_type != "opencode_session"
+                && item.item_type != "copilot_agent"
+                && item.item_type != "cli_session"
                 && item.item_type != "github_pr"
             {
                 continue;
@@ -76,6 +91,8 @@ impl PollingManager {
                 "opencode_session" => {
                     Self::poll_opencode_session(db, &item, &opencode_statuses, app_handle).await
                 }
+                "copilot_agent" => Self::poll_copilot_session(db, &item, app_handle),
+                "cli_session" => Self::poll_cli_session(db, &item, app_handle),
                 _ => continue,
             };
 
@@ -374,6 +391,7 @@ impl PollingManager {
                     last_updated_at: None,
                     created_at: chrono::Utc::now().to_rfc3339(),
                     archived: false,
+                    archived_at: None,
                     polling_interval_override: None,
                     checked: status_str == "archived",
                 };
@@ -492,6 +510,278 @@ impl PollingManager {
             && (new_status == "waiting" || new_status == "in_progress")
         {
             db.toggle_checked(&item.id, false)?;
+        }
+
+        Ok(())
+    }
+
+    fn discover_copilot_sessions(
+        db: &Arc<Database>,
+        app_handle: &AppHandle,
+    ) -> anyhow::Result<()> {
+        let existing_ids = db.get_copilot_session_ids()?;
+        let sessions = copilot_cli::discover_sessions();
+
+        for session in sessions {
+            if existing_ids.contains(&session.id) {
+                continue;
+            }
+
+            let activity = copilot_cli::detect_session_activity(&session.id);
+            let status = match activity {
+                copilot_cli::SessionActivity::InProgress => "in_progress",
+                copilot_cli::SessionActivity::InputNeeded => "input_needed",
+                copilot_cli::SessionActivity::Idle => "completed",
+            };
+
+            // Auto-name: summary > first user message > repository > generic
+            let title = session
+                .display_name()
+                .map(|s| copilot_cli::truncate_title(s))
+                .or_else(|| copilot_cli::first_user_message(&session.id))
+                .or_else(|| {
+                    session.repository.as_ref().map(|r| format!("Session in {}", r))
+                })
+                .unwrap_or_else(|| {
+                    format!("Copilot Session {}", &session.id[..8.min(session.id.len())])
+                });
+
+            let metadata = serde_json::json!({
+                "copilot_session_id": session.id,
+                "cwd": session.cwd,
+                "repository": session.repository,
+                "branch": session.branch,
+                "summary": session.summary,
+            });
+
+            let item = Item {
+                id: uuid::Uuid::new_v4().to_string(),
+                item_type: "copilot_agent".to_string(),
+                title,
+                url: None,
+                status: status.to_string(),
+                previous_status: None,
+                metadata: serde_json::to_string(&metadata)?,
+                last_checked_at: None,
+                last_updated_at: session.updated_at.clone(),
+                created_at: session
+                    .created_at
+                    .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
+                archived: false,
+                archived_at: None,
+                polling_interval_override: None,
+                checked: false,
+            };
+
+            db.add_item(&item)?;
+            let _ = app_handle.emit("item-updated", &item.id);
+        }
+
+        Ok(())
+    }
+
+    fn poll_copilot_session(
+        db: &Arc<Database>,
+        item: &crate::db::Item,
+        app_handle: &AppHandle,
+    ) -> anyhow::Result<()> {
+        let metadata: serde_json::Value = serde_json::from_str(&item.metadata)?;
+        let session_id = metadata["copilot_session_id"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Missing copilot_session_id"))?;
+
+        let session = match copilot_cli::read_session(session_id) {
+            Some(s) => s,
+            None => {
+                db.touch_item_check(&item.id)?;
+                return Ok(());
+            }
+        };
+
+        // Detect live status from events.jsonl
+        let activity = copilot_cli::detect_session_activity(session_id);
+        let new_status = match activity {
+            copilot_cli::SessionActivity::InProgress => "in_progress",
+            copilot_cli::SessionActivity::InputNeeded => "input_needed",
+            copilot_cli::SessionActivity::Idle => "completed",
+        };
+
+        // Update title: summary > first user message > keep current
+        let best_name = session
+            .display_name()
+            .map(|s| copilot_cli::truncate_title(s))
+            .or_else(|| copilot_cli::first_user_message(session_id));
+
+        if let Some(name) = &best_name {
+            if !name.is_empty() && *name != item.title {
+                db.update_item_title(&item.id, name)?;
+            }
+        }
+
+        // Update metadata
+        let last_activity = copilot_cli::last_event_timestamp(session_id);
+        let new_metadata = serde_json::json!({
+            "copilot_session_id": session.id,
+            "cwd": session.cwd,
+            "repository": session.repository,
+            "branch": session.branch,
+            "summary": session.summary,
+            "last_activity": last_activity,
+        });
+        let new_metadata_str = serde_json::to_string(&new_metadata)?;
+
+        db.update_item_status(&item.id, new_status, Some(&new_metadata_str))?;
+
+        // Notifications on status transitions (following OpenCode pattern)
+        if new_status != item.status {
+            let notification_body = match (item.status.as_str(), new_status) {
+                ("in_progress", "input_needed") => Some("Waiting for your input"),
+                ("in_progress", "completed") => Some("Agent finished working"),
+                ("input_needed" | "completed", "in_progress") => Some("Agent started working"),
+                _ => None,
+            };
+
+            if let Some(body) = notification_body {
+                let _ = app_handle
+                    .notification()
+                    .builder()
+                    .title(&item.title)
+                    .body(body)
+                    .show();
+            }
+        }
+
+        // Auto-uncheck when session becomes active
+        if (item.status == "input_needed" || item.status == "completed" || item.status == "failed")
+            && (new_status == "waiting" || new_status == "in_progress")
+        {
+            db.toggle_checked(&item.id, false)?;
+        }
+
+        Ok(())
+    }
+
+    fn poll_cli_session(
+        db: &Arc<Database>,
+        item: &crate::db::Item,
+        app_handle: &AppHandle,
+    ) -> anyhow::Result<()> {
+        let metadata: serde_json::Value = serde_json::from_str(&item.metadata)?;
+        let command = metadata["command"].as_str().unwrap_or("");
+
+        // Only enrich copilot sessions
+        if !command.contains("copilot") {
+            db.touch_item_check(&item.id)?;
+            return Ok(());
+        }
+
+        // If already matched to a copilot session, poll via events.jsonl
+        if let Some(sid) = metadata["copilot_session_id"].as_str() {
+            if let Some(session) = copilot_cli::read_session(sid) {
+                // Detect live status
+                let activity = copilot_cli::detect_session_activity(sid);
+                let new_status = match activity {
+                    copilot_cli::SessionActivity::InProgress => "in_progress",
+                    copilot_cli::SessionActivity::InputNeeded => "input_needed",
+                    copilot_cli::SessionActivity::Idle => "completed",
+                };
+
+                let best_name = session
+                    .display_name()
+                    .map(|s| copilot_cli::truncate_title(s))
+                    .or_else(|| copilot_cli::first_user_message(sid));
+                if let Some(name) = &best_name {
+                    if !name.is_empty() && *name != item.title {
+                        db.update_item_title(&item.id, name)?;
+                    }
+                }
+
+                let mut new_meta = metadata.clone();
+                if let Some(map) = new_meta.as_object_mut() {
+                    map.insert("summary".to_string(), serde_json::json!(session.summary));
+                    map.insert("repository".to_string(), serde_json::json!(session.repository));
+                    map.insert("branch".to_string(), serde_json::json!(session.branch));
+                    let ts = copilot_cli::last_event_timestamp(sid);
+                    if let Some(ts) = ts {
+                        map.insert("last_activity".to_string(), serde_json::json!(ts));
+                    }
+                }
+                db.update_item_status(&item.id, new_status, Some(&new_meta.to_string()))?;
+
+                // Notifications on status transitions
+                if new_status != item.status {
+                    let notification_body = match (item.status.as_str(), new_status) {
+                        ("in_progress", "input_needed") => Some("Waiting for your input"),
+                        ("in_progress", "completed") => Some("Agent finished working"),
+                        ("input_needed" | "completed", "in_progress") => {
+                            Some("Agent started working")
+                        }
+                        _ => None,
+                    };
+                    if let Some(body) = notification_body {
+                        let _ = app_handle
+                            .notification()
+                            .builder()
+                            .title(&item.title)
+                            .body(body)
+                            .show();
+                    }
+                }
+
+                return Ok(());
+            }
+        }
+
+        // Try to match by cwd first, then fall back to creation time
+        let cwd = metadata["cwd"].as_str();
+        let session = cwd
+            .and_then(copilot_cli::find_session_by_cwd)
+            .or_else(|| copilot_cli::find_session_by_time(&item.created_at));
+
+        if let Some(session) = session {
+            // Remove any duplicate copilot_agent entry for this session
+            let removed = db.remove_copilot_agent_by_session_id(&session.id)?;
+            for removed_id in &removed {
+                let _ = app_handle.emit("item-updated", removed_id);
+            }
+
+            let best_name = session
+                .display_name()
+                .map(|s| copilot_cli::truncate_title(s))
+                .or_else(|| copilot_cli::first_user_message(&session.id));
+            if let Some(name) = &best_name {
+                if !name.is_empty() && *name != item.title {
+                    db.update_item_title(&item.id, name)?;
+                }
+            }
+
+            // Detect live status from events.jsonl on first match
+            let activity = copilot_cli::detect_session_activity(&session.id);
+            let new_status = match activity {
+                copilot_cli::SessionActivity::InProgress => "in_progress",
+                copilot_cli::SessionActivity::InputNeeded => "input_needed",
+                copilot_cli::SessionActivity::Idle => "completed",
+            };
+
+            let mut new_meta = metadata.clone();
+            if let Some(map) = new_meta.as_object_mut() {
+                map.insert(
+                    "copilot_session_id".to_string(),
+                    serde_json::json!(session.id),
+                );
+                map.insert("summary".to_string(), serde_json::json!(session.summary));
+                map.insert(
+                    "repository".to_string(),
+                    serde_json::json!(session.repository),
+                );
+                map.insert("branch".to_string(), serde_json::json!(session.branch));
+                if let Some(ts) = copilot_cli::last_event_timestamp(&session.id) {
+                    map.insert("last_activity".to_string(), serde_json::json!(ts));
+                }
+            }
+            db.update_item_status(&item.id, new_status, Some(&new_meta.to_string()))?;
+        } else {
+            db.touch_item_check(&item.id)?;
         }
 
         Ok(())

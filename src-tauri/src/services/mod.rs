@@ -3,3 +3,4 @@ pub mod slack;
 pub mod github_actions;
 pub mod github_pr;
 pub mod opencode;
+pub mod copilot_cli;

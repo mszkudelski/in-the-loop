@@ -14,6 +14,8 @@ use uuid::Uuid;
 struct CreateSessionRequest {
     command: String,
     title: String,
+    #[serde(default)]
+    cwd: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -59,6 +61,9 @@ async fn create_session(
 
     let mut metadata = std::collections::HashMap::new();
     metadata.insert("command".to_string(), payload.command);
+    if let Some(ref cwd) = payload.cwd {
+        metadata.insert("cwd".to_string(), cwd.clone());
+    }
 
     let item = Item {
         id: id.clone(),
@@ -72,6 +77,7 @@ async fn create_session(
         last_updated_at: Some(now.clone()),
         created_at: now,
         archived: false,
+        archived_at: None,
         polling_interval_override: None,
         checked: false,
     };

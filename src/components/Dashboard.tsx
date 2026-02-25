@@ -11,13 +11,10 @@ export function Dashboard() {
   const [items, setItems] = useState<Item[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [filter, setFilter] = useState<Item['type'] | 'all'>('all');
-  const [hideChecked, setHideChecked] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
 
   useEffect(() => {
     loadItems();
-    invoke<string | null>('get_setting', { key: 'hide_checked' }).then(val => {
-      if (val === 'true') setHideChecked(true);
-    }).catch(() => {});
 
     const unlisten = listen('item-updated', () => {
       loadItems();
@@ -28,9 +25,13 @@ export function Dashboard() {
     };
   }, []);
 
+  useEffect(() => {
+    loadItems();
+  }, [showArchived]);
+
   const loadItems = async () => {
     try {
-      const loadedItems: Item[] = await invoke('get_items', { archived: false });
+      const loadedItems: Item[] = await invoke('get_items', { archived: showArchived });
       const parsedItems = loadedItems.map(item => ({
         ...item,
         metadata: typeof item.metadata === 'string' ? JSON.parse(item.metadata) : item.metadata,
@@ -41,33 +42,39 @@ export function Dashboard() {
     }
   };
 
-  const handleRemove = (id: string) => {
-    setItems(items.filter(item => item.id !== id));
-  };
-
-  const handleToggleChecked = async (id: string, checked: boolean) => {
+  const handleArchive = async (id: string) => {
     try {
-      await invoke('toggle_checked', { id, checked });
-      setItems(prev => prev.map(item =>
-        item.id === id ? { ...item, checked } : item
-      ));
+      await invoke('archive_item', { id });
+      setItems(items.filter(item => item.id !== id));
     } catch (error) {
-      console.error('Failed to toggle checked:', error);
+      console.error('Failed to archive item:', error);
     }
   };
 
-  const filteredItems = (filter === 'all' 
-    ? items 
-    : items.filter(item => item.type === filter)
-  ).filter(item => !hideChecked || !item.checked);
+  const handleUnarchive = async (id: string) => {
+    try {
+      await invoke('unarchive_item', { id });
+      setItems(items.filter(item => item.id !== id));
+    } catch (error) {
+      console.error('Failed to unarchive item:', error);
+    }
+  };
 
-  const sortedItems = [...filteredItems].sort((a, b) => {
-    if (a.checked && !b.checked) return 1;
-    if (!a.checked && b.checked) return -1;
-    if (a.status === 'archived' && b.status !== 'archived') return 1;
-    if (a.status !== 'archived' && b.status === 'archived') return -1;
-    return 0;
-  });
+  const handleArchiveOld = async () => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const before = today.toISOString();
+    try {
+      const count: number = await invoke('archive_stale_items', { before });
+      if (count > 0) loadItems();
+    } catch (error) {
+      console.error('Failed to archive old items:', error);
+    }
+  };
+
+  const filteredItems = filter === 'all' 
+    ? items 
+    : items.filter(item => item.type === filter);
 
   const typeCounts = {
     all: items.length,
@@ -90,7 +97,7 @@ export function Dashboard() {
       </div>
 
       <UpdatePrompt />
-      <AddItemForm onItemAdded={loadItems} />
+      {!showArchived && <AddItemForm onItemAdded={loadItems} />}
 
       <div className="filter-row">
         <button 
@@ -147,34 +154,36 @@ export function Dashboard() {
             OpenCode ({typeCounts.opencode_session})
           </button>
         )}
+        {!showArchived && items.length > 0 && (
+          <button className="btn-ghost btn-archive-old" onClick={handleArchiveOld}>
+            Archive old
+          </button>
+        )}
         <label className="filter-toggle">
           <input
             type="checkbox"
-            checked={hideChecked}
-            onChange={() => {
-              const next = !hideChecked;
-              setHideChecked(next);
-              invoke('save_setting', { key: 'hide_checked', value: String(next) }).catch(() => {});
-            }}
+            checked={showArchived}
+            onChange={() => setShowArchived(!showArchived)}
           />
-          Hide checked
+          Archived
         </label>
       </div>
 
-      {sortedItems.length === 0 ? (
+      {filteredItems.length === 0 ? (
         <div className="empty-state">
           {items.length === 0 
-            ? 'No items tracked yet. Add a URL above to get started.' 
+            ? (showArchived ? 'No archived items' : 'No items tracked yet. Add a URL above to get started.')
             : 'No items in this category'}
         </div>
       ) : (
         <div className="item-list">
-          {sortedItems.map(item => (
+          {filteredItems.map(item => (
             <ItemCard
               key={item.id}
               item={item}
-              onRemove={handleRemove}
-              onToggleChecked={handleToggleChecked}
+              isArchived={showArchived}
+              onArchive={handleArchive}
+              onUnarchive={handleUnarchive}
             />
           ))}
         </div>

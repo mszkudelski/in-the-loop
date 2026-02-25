@@ -29,6 +29,7 @@ export interface Item {
   last_updated_at?: string;
   created_at: string;
   archived: boolean;
+  archived_at?: string;
   polling_interval_override?: number;
   checked: boolean;
 }
