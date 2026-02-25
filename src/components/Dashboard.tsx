@@ -5,6 +5,7 @@ import { Item } from '../types';
 import { ItemCard } from './ItemCard';
 import { AddItemForm } from './AddItemForm';
 import { Settings } from './Settings';
+import { UpdatePrompt } from './UpdatePrompt';
 
 export function Dashboard() {
   const [items, setItems] = useState<Item[]>([]);
@@ -88,6 +89,7 @@ export function Dashboard() {
         </div>
       </div>
 
+      <UpdatePrompt />
       <AddItemForm onItemAdded={loadItems} />
 
       <div className="filter-row">
