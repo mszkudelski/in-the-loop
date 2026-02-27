@@ -13,8 +13,45 @@ interface BindPopoverProps {
   onChanged: () => void;
 }
 
+function TodoOptionRow({ todo, bound, onToggle, indent }: {
+  todo: TodoWithBindings;
+  bound: Set<string>;
+  onToggle: (id: string) => void;
+  indent: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const hasSubtasks = (todo.subtasks || []).length > 0;
+
+  return (
+    <>
+      <label className={`bind-popover-option ${indent ? 'bind-popover-indent' : ''}`}>
+        {!indent && hasSubtasks && (
+          <button
+            type="button"
+            className="btn-expand"
+            onClick={e => { e.preventDefault(); setExpanded(!expanded); }}
+          >
+            {expanded ? '▾' : '▸'}
+          </button>
+        )}
+        {!indent && !hasSubtasks && <span className="btn-expand-placeholder" />}
+        <input
+          type="checkbox"
+          checked={bound.has(todo.id)}
+          onChange={() => onToggle(todo.id)}
+        />
+        <span className="bind-popover-label">{todo.title}</span>
+      </label>
+      {expanded && (todo.subtasks || []).map(sub => (
+        <TodoOptionRow key={sub.id} todo={sub} bound={bound} onToggle={onToggle} indent />
+      ))}
+    </>
+  );
+}
+
 export function BindPopover({ x, y, mode, sourceId, boundIds, onClose, onChanged }: BindPopoverProps) {
-  const [options, setOptions] = useState<{ id: string; label: string }[]>([]);
+  const [itemOptions, setItemOptions] = useState<{ id: string; label: string }[]>([]);
+  const [todoOptions, setTodoOptions] = useState<TodoWithBindings[]>([]);
   const [bound, setBound] = useState<Set<string>>(new Set(boundIds));
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -43,16 +80,13 @@ export function BindPopover({ x, y, mode, sourceId, boundIds, onClose, onChanged
     try {
       if (mode === 'items') {
         const items: Item[] = await invoke('get_items', { archived: false });
-        setOptions(items.map(i => ({
+        setItemOptions(items.map(i => ({
           id: i.id,
           label: `${i.title}`,
         })));
       } else {
         const todos: TodoWithBindings[] = await invoke('get_todos');
-        setOptions(todos.map(t => ({
-          id: t.id,
-          label: t.title,
-        })));
+        setTodoOptions(todos);
       }
     } catch (error) {
       console.error('Failed to load options:', error);
@@ -82,6 +116,8 @@ export function BindPopover({ x, y, mode, sourceId, boundIds, onClose, onChanged
     }
   };
 
+  const hasOptions = mode === 'items' ? itemOptions.length > 0 : todoOptions.length > 0;
+
   return (
     <div
       ref={popoverRef}
@@ -91,22 +127,34 @@ export function BindPopover({ x, y, mode, sourceId, boundIds, onClose, onChanged
       <div className="bind-popover-title">
         {mode === 'items' ? 'Bind to item' : 'Bind to todo'}
       </div>
-      {options.length === 0 ? (
+      {!hasOptions ? (
         <div className="bind-popover-empty">
           {mode === 'items' ? 'No items available' : 'No todos available'}
         </div>
       ) : (
         <div className="bind-popover-list">
-          {options.map(opt => (
-            <label key={opt.id} className="bind-popover-option">
-              <input
-                type="checkbox"
-                checked={bound.has(opt.id)}
-                onChange={() => handleToggle(opt.id)}
+          {mode === 'items' ? (
+            itemOptions.map(opt => (
+              <label key={opt.id} className="bind-popover-option">
+                <input
+                  type="checkbox"
+                  checked={bound.has(opt.id)}
+                  onChange={() => handleToggle(opt.id)}
+                />
+                <span className="bind-popover-label">{opt.label}</span>
+              </label>
+            ))
+          ) : (
+            todoOptions.map(todo => (
+              <TodoOptionRow
+                key={todo.id}
+                todo={todo}
+                bound={bound}
+                onToggle={handleToggle}
+                indent={false}
               />
-              <span className="bind-popover-label">{opt.label}</span>
-            </label>
-          ))}
+            ))
+          )}
         </div>
       )}
     </div>
