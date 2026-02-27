@@ -625,15 +625,14 @@ impl PollingManager {
         let activity = copilot_cli::detect_session_activity(session_id, process_running);
 
         // If the copilot process is no longer running, the session is closed.
-        // If it was already closed and events are still idle, keep it closed
-        // (another session at the same CWD is running, not this one).
-        let new_status = if !process_running {
+        // A closed session stays closed — process_running may be true because
+        // a different session at the same CWD is active, not this one.
+        let new_status = if !process_running || item.status == "closed" {
             "closed"
         } else {
             match activity {
                 copilot_cli::SessionActivity::InProgress => "in_progress",
                 copilot_cli::SessionActivity::InputNeeded => "input_needed",
-                copilot_cli::SessionActivity::Idle if item.status == "closed" => "closed",
                 copilot_cli::SessionActivity::Idle if item.status == "waiting" => "waiting",
                 copilot_cli::SessionActivity::Idle => "completed",
             }
@@ -716,13 +715,12 @@ impl PollingManager {
                 let process_running = copilot_cli::is_session_process_running(&session, active_cwds);
                 let activity = copilot_cli::detect_session_activity(sid, process_running);
 
-                let new_status = if !process_running {
+                let new_status = if !process_running || item.status == "closed" {
                     "closed"
                 } else {
                     match activity {
                         copilot_cli::SessionActivity::InProgress => "in_progress",
                         copilot_cli::SessionActivity::InputNeeded => "input_needed",
-                        copilot_cli::SessionActivity::Idle if item.status == "closed" => "closed",
                         copilot_cli::SessionActivity::Idle if item.status == "waiting" => "waiting",
                         copilot_cli::SessionActivity::Idle => "completed",
                     }
@@ -802,7 +800,7 @@ impl PollingManager {
             let process_running = copilot_cli::is_session_process_running(&session, active_cwds);
             let activity = copilot_cli::detect_session_activity(&session.id, process_running);
 
-            let new_status = if !process_running {
+            let new_status = if !process_running || item.status == "closed" {
                 "closed"
             } else {
                 match activity {
