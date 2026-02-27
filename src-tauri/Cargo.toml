@@ -1,6 +1,6 @@
 [package]
 name = "in-the-loop"
-version = "0.6.0"
+version = "0.6.1"
 description = "Local-only desktop app for macOS to stay in the loop on async work items"
 authors = ["you"]
 edition = "2021"
