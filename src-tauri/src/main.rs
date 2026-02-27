@@ -96,6 +96,13 @@ fn main() {
             commands::save_setting,
             commands::get_setting,
             commands::open_url,
+            commands::add_todo,
+            commands::get_todos,
+            commands::update_todo_status,
+            commands::delete_todo,
+            commands::bind_todo_to_item,
+            commands::unbind_todo_from_item,
+            commands::get_todo_ids_for_item,
             in_the_loop_lib::updater::fetch_update,
             in_the_loop_lib::updater::install_update,
         ])

@@ -1,4 +1,4 @@
-use crate::db::{Credentials, Database, Item, Settings};
+use crate::db::{Credentials, Database, Item, Settings, Todo, TodoWithBindings};
 use crate::services::url_parser;
 use crate::tray;
 use anyhow::Result;
@@ -211,4 +211,74 @@ pub async fn open_url(url: String) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         Ok(())
     }
+}
+
+#[tauri::command]
+pub async fn add_todo(title: String, state: State<'_, AppState>) -> Result<Todo, String> {
+    let todo = Todo {
+        id: Uuid::new_v4().to_string(),
+        title,
+        status: "open".to_string(),
+        created_at: chrono::Utc::now().to_rfc3339(),
+        completed_at: None,
+    };
+    state.db.add_todo(&todo).map_err(|e| e.to_string())?;
+    Ok(todo)
+}
+
+#[tauri::command]
+pub async fn get_todos(state: State<'_, AppState>) -> Result<Vec<TodoWithBindings>, String> {
+    state.db.get_todos().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn update_todo_status(
+    id: String,
+    status: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .db
+        .update_todo_status(&id, &status)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_todo(id: String, state: State<'_, AppState>) -> Result<(), String> {
+    state.db.delete_todo(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn bind_todo_to_item(
+    todo_id: String,
+    item_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .db
+        .bind_todo_to_item(&todo_id, &item_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn unbind_todo_from_item(
+    todo_id: String,
+    item_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .db
+        .unbind_todo_from_item(&todo_id, &item_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_todo_ids_for_item(
+    item_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    state
+        .db
+        .get_todo_ids_for_item(&item_id)
+        .map_err(|e| e.to_string())
 }
