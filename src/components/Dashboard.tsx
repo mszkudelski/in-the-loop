@@ -60,6 +60,15 @@ export function Dashboard() {
     }
   };
 
+  const handleArchiveClosed = async () => {
+    try {
+      const count: number = await invoke('archive_closed_items');
+      if (count > 0) loadItems();
+    } catch (error) {
+      console.error('Failed to archive closed items:', error);
+    }
+  };
+
   const handleArchiveOld = async () => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -155,9 +164,14 @@ export function Dashboard() {
           </button>
         )}
         {!showArchived && items.length > 0 && (
-          <button className="btn-ghost btn-archive-old" onClick={handleArchiveOld}>
-            Archive old
-          </button>
+          <>
+            <button className="btn-ghost btn-archive-old" onClick={handleArchiveClosed}>
+              Archive closed
+            </button>
+            <button className="btn-ghost btn-archive-old" onClick={handleArchiveOld}>
+              Archive old
+            </button>
+          </>
         )}
         <label className="filter-toggle">
           <input

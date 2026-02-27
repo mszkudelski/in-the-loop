@@ -1,7 +1,7 @@
 use crate::db::{Database, Item};
 use crate::services::{copilot_cli, github_actions, github_pr, opencode, slack, url_parser};
 use crate::tray;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
@@ -57,7 +57,9 @@ impl PollingManager {
             eprintln!("Error discovering OpenCode sessions: {}", e);
         }
 
-        if let Err(e) = Self::discover_copilot_sessions(db, app_handle) {
+        let active_cwds = copilot_cli::get_active_copilot_cwds();
+
+        if let Err(e) = Self::discover_copilot_sessions(db, app_handle, &active_cwds) {
             eprintln!("Error discovering Copilot CLI sessions: {}", e);
         }
 
@@ -70,7 +72,7 @@ impl PollingManager {
             // (archived sessions need status tracking, idle sessions may become busy).
             // "failed" github_action/github_pr items are re-polled so they can recover
             // if the failure was due to a transient polling error.
-            if (item.status == "completed" || item.status == "archived" || item.status == "merged")
+            if (item.status == "completed" || item.status == "closed" || item.status == "archived" || item.status == "merged")
                 && item.item_type != "opencode_session"
                 && item.item_type != "copilot_agent"
                 && item.item_type != "cli_session"
@@ -91,8 +93,8 @@ impl PollingManager {
                 "opencode_session" => {
                     Self::poll_opencode_session(db, &item, &opencode_statuses, app_handle).await
                 }
-                "copilot_agent" => Self::poll_copilot_session(db, &item, app_handle),
-                "cli_session" => Self::poll_cli_session(db, &item, app_handle),
+                "copilot_agent" => Self::poll_copilot_session(db, &item, app_handle, &active_cwds),
+                "cli_session" => Self::poll_cli_session(db, &item, app_handle, &active_cwds),
                 _ => continue,
             };
 
@@ -355,7 +357,7 @@ impl PollingManager {
                     match statuses.get(&session.id) {
                         Some(opencode::SessionStatus::Busy) => "in_progress",
                         Some(opencode::SessionStatus::Retry { .. }) => "in_progress",
-                        Some(opencode::SessionStatus::Idle) | None => "completed",
+                        Some(opencode::SessionStatus::Idle) | None => "waiting",
                     }
                 };
 
@@ -452,6 +454,7 @@ impl PollingManager {
         } else {
             match session_status {
                 "busy" | "retry" => "in_progress",
+                _ if item.status == "waiting" => "waiting",
                 _ => "completed",
             }
         };
@@ -505,8 +508,8 @@ impl PollingManager {
             db.toggle_checked(&item.id, true)?;
         }
 
-        // Auto-uncheck when session becomes active again (input_needed/completed/failed → waiting/in_progress)
-        if (item.status == "input_needed" || item.status == "completed" || item.status == "failed")
+        // Auto-uncheck when session becomes active again (input_needed/completed/closed/failed → waiting/in_progress)
+        if (item.status == "input_needed" || item.status == "completed" || item.status == "closed" || item.status == "failed")
             && (new_status == "waiting" || new_status == "in_progress")
         {
             db.toggle_checked(&item.id, false)?;
@@ -518,6 +521,7 @@ impl PollingManager {
     fn discover_copilot_sessions(
         db: &Arc<Database>,
         app_handle: &AppHandle,
+        active_cwds: &HashSet<String>,
     ) -> anyhow::Result<()> {
         let existing_ids = db.get_copilot_session_ids()?;
         let sessions = copilot_cli::discover_sessions();
@@ -528,10 +532,16 @@ impl PollingManager {
             }
 
             let activity = copilot_cli::detect_session_activity(&session.id);
-            let status = match activity {
-                copilot_cli::SessionActivity::InProgress => "in_progress",
-                copilot_cli::SessionActivity::InputNeeded => "input_needed",
-                copilot_cli::SessionActivity::Idle => "completed",
+            let process_running = copilot_cli::is_session_process_running(&session, active_cwds);
+
+            let status = if !process_running {
+                "closed"
+            } else {
+                match activity {
+                    copilot_cli::SessionActivity::InProgress => "in_progress",
+                    copilot_cli::SessionActivity::InputNeeded => "input_needed",
+                    copilot_cli::SessionActivity::Idle => "waiting",
+                }
             };
 
             // Auto-name: summary > first user message > repository > generic
@@ -584,6 +594,7 @@ impl PollingManager {
         db: &Arc<Database>,
         item: &crate::db::Item,
         app_handle: &AppHandle,
+        active_cwds: &HashSet<String>,
     ) -> anyhow::Result<()> {
         let metadata: serde_json::Value = serde_json::from_str(&item.metadata)?;
         let session_id = metadata["copilot_session_id"]
@@ -600,13 +611,23 @@ impl PollingManager {
 
         // Detect live status from events.jsonl
         let activity = copilot_cli::detect_session_activity(session_id);
-        let new_status = match activity {
-            copilot_cli::SessionActivity::InProgress => "in_progress",
-            copilot_cli::SessionActivity::InputNeeded => "input_needed",
-            copilot_cli::SessionActivity::Idle => "completed",
+        let process_running = copilot_cli::is_session_process_running(&session, active_cwds);
+
+        // If the copilot process is no longer running, the session is closed.
+        // If it was already closed and events are still idle, keep it closed
+        // (another session at the same CWD is running, not this one).
+        let new_status = if !process_running {
+            "closed"
+        } else {
+            match activity {
+                copilot_cli::SessionActivity::InProgress => "in_progress",
+                copilot_cli::SessionActivity::InputNeeded => "input_needed",
+                copilot_cli::SessionActivity::Idle if item.status == "closed" => "closed",
+                copilot_cli::SessionActivity::Idle if item.status == "waiting" => "waiting",
+                copilot_cli::SessionActivity::Idle => "completed",
+            }
         };
 
-        // Update title: summary > first user message > keep current
         let best_name = session
             .display_name()
             .map(|s| copilot_cli::truncate_title(s))
@@ -637,7 +658,8 @@ impl PollingManager {
             let notification_body = match (item.status.as_str(), new_status) {
                 ("in_progress", "input_needed") => Some("Waiting for your input"),
                 ("in_progress", "completed") => Some("Agent finished working"),
-                ("input_needed" | "completed", "in_progress") => Some("Agent started working"),
+                ("in_progress", "closed") => Some("Session closed"),
+                ("input_needed" | "completed" | "closed", "in_progress") => Some("Agent started working"),
                 _ => None,
             };
 
@@ -652,7 +674,7 @@ impl PollingManager {
         }
 
         // Auto-uncheck when session becomes active
-        if (item.status == "input_needed" || item.status == "completed" || item.status == "failed")
+        if (item.status == "input_needed" || item.status == "completed" || item.status == "closed" || item.status == "failed")
             && (new_status == "waiting" || new_status == "in_progress")
         {
             db.toggle_checked(&item.id, false)?;
@@ -665,6 +687,7 @@ impl PollingManager {
         db: &Arc<Database>,
         item: &crate::db::Item,
         app_handle: &AppHandle,
+        active_cwds: &HashSet<String>,
     ) -> anyhow::Result<()> {
         let metadata: serde_json::Value = serde_json::from_str(&item.metadata)?;
         let command = metadata["command"].as_str().unwrap_or("");
@@ -680,10 +703,18 @@ impl PollingManager {
             if let Some(session) = copilot_cli::read_session(sid) {
                 // Detect live status
                 let activity = copilot_cli::detect_session_activity(sid);
-                let new_status = match activity {
-                    copilot_cli::SessionActivity::InProgress => "in_progress",
-                    copilot_cli::SessionActivity::InputNeeded => "input_needed",
-                    copilot_cli::SessionActivity::Idle => "completed",
+                let process_running = copilot_cli::is_session_process_running(&session, active_cwds);
+
+                let new_status = if !process_running {
+                    "closed"
+                } else {
+                    match activity {
+                        copilot_cli::SessionActivity::InProgress => "in_progress",
+                        copilot_cli::SessionActivity::InputNeeded => "input_needed",
+                        copilot_cli::SessionActivity::Idle if item.status == "closed" => "closed",
+                        copilot_cli::SessionActivity::Idle if item.status == "waiting" => "waiting",
+                        copilot_cli::SessionActivity::Idle => "completed",
+                    }
                 };
 
                 let best_name = session
@@ -713,7 +744,8 @@ impl PollingManager {
                     let notification_body = match (item.status.as_str(), new_status) {
                         ("in_progress", "input_needed") => Some("Waiting for your input"),
                         ("in_progress", "completed") => Some("Agent finished working"),
-                        ("input_needed" | "completed", "in_progress") => {
+                        ("in_progress", "closed") => Some("Session closed"),
+                        ("input_needed" | "completed" | "closed", "in_progress") => {
                             Some("Agent started working")
                         }
                         _ => None,
@@ -757,10 +789,17 @@ impl PollingManager {
 
             // Detect live status from events.jsonl on first match
             let activity = copilot_cli::detect_session_activity(&session.id);
-            let new_status = match activity {
-                copilot_cli::SessionActivity::InProgress => "in_progress",
-                copilot_cli::SessionActivity::InputNeeded => "input_needed",
-                copilot_cli::SessionActivity::Idle => "completed",
+            let process_running = copilot_cli::is_session_process_running(&session, active_cwds);
+
+            let new_status = if !process_running {
+                "closed"
+            } else {
+                match activity {
+                    copilot_cli::SessionActivity::InProgress => "in_progress",
+                    copilot_cli::SessionActivity::InputNeeded => "input_needed",
+                    copilot_cli::SessionActivity::Idle if item.status == "waiting" => "waiting",
+                    copilot_cli::SessionActivity::Idle => "completed",
+                }
             };
 
             let mut new_meta = metadata.clone();
