@@ -175,9 +175,9 @@ pub fn find_session_by_cwd(cwd: &str) -> Option<CopilotSession> {
 /// Strategy: read the tail of events.jsonl and check event types.
 /// - `task_complete` tool in recent events → Idle (completed)
 /// - `ask_user` tool pending → InputNeeded
-/// - `assistant.turn_end` → InputNeeded (or Idle if >2 min old)
+/// - `assistant.turn_end` → Idle (agent finished its turn)
 /// - Other events → InProgress (or Idle if >2 min old)
-pub fn detect_session_activity(session_id: &str) -> SessionActivity {
+pub fn detect_session_activity(session_id: &str, process_running: bool) -> SessionActivity {
     let base = match session_state_dir() {
         Some(p) => p,
         None => return SessionActivity::Idle,
@@ -217,6 +217,15 @@ pub fn detect_session_activity(session_id: &str) -> SessionActivity {
             .map(|name| name == "ask_user" || name == "askUser")
             .unwrap_or(false);
 
+    // Check if the assistant proposed tool calls waiting for user confirmation
+    let has_tool_requests = event_type == "assistant.message"
+        && last_event
+            .get("data")
+            .and_then(|d| d.get("toolRequests"))
+            .and_then(|v| v.as_array())
+            .map(|arr| !arr.is_empty())
+            .unwrap_or(false);
+
     let is_stale = last_event
         .get("timestamp")
         .and_then(|v| v.as_str())
@@ -228,12 +237,24 @@ pub fn detect_session_activity(session_id: &str) -> SessionActivity {
         .unwrap_or(true);
 
     match event_type {
-        // tool.execution_start for ask_user means waiting for user input
+        // tool.execution_start for ask_user means waiting for user input.
+        // Stay InputNeeded as long as the process is alive — user may take a while.
         "tool.execution_start" if is_user_input_tool => {
-            if is_stale {
-                SessionActivity::Idle
-            } else {
+            if process_running || !is_stale {
                 SessionActivity::InputNeeded
+            } else {
+                SessionActivity::Idle
+            }
+        }
+
+        // assistant.message with toolRequests means the agent proposed tool calls
+        // and is waiting for user confirmation (unless Brave Mode is on).
+        // Stay InputNeeded as long as the process is alive.
+        "assistant.message" if has_tool_requests => {
+            if process_running || !is_stale {
+                SessionActivity::InputNeeded
+            } else {
+                SessionActivity::Idle
             }
         }
 
@@ -248,14 +269,9 @@ pub fn detect_session_activity(session_id: &str) -> SessionActivity {
             }
         }
 
-        // Agent finished a turn — waiting for user (or idle if stale)
-        "assistant.turn_end" => {
-            if is_stale {
-                SessionActivity::Idle
-            } else {
-                SessionActivity::InputNeeded
-            }
-        }
+        // Agent finished a turn — treat as idle (not input needed).
+        // Only explicit ask_user tool calls indicate the agent needs user input.
+        "assistant.turn_end" => SessionActivity::Idle,
 
         // User just sent a message — agent will start soon
         "user.message" => {

@@ -141,12 +141,10 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-pub fn update_tray_badge(app_handle: &AppHandle, db: &Arc<Database>) {
-    let count = db.count_actionable_items().unwrap_or(0);
-
+pub fn update_tray_badge(app_handle: &AppHandle, actionable_count: usize) {
     if let Some(tray) = app_handle.tray_by_id(TRAY_ID) {
-        let title = if count > 0 {
-            Some(count.to_string())
+        let title = if actionable_count > 0 {
+            Some(actionable_count.to_string())
         } else {
             None
         };
@@ -154,17 +152,31 @@ pub fn update_tray_badge(app_handle: &AppHandle, db: &Arc<Database>) {
     }
 }
 
-pub fn rebuild_tray_menu(app_handle: &AppHandle, db: &Arc<Database>) {
-    let items = db.get_visible_items().unwrap_or_default();
-
+pub fn rebuild_tray_menu(app_handle: &AppHandle, items: &[Item]) {
     if let Some(tray) = app_handle.tray_by_id(TRAY_ID) {
-        if let Ok(menu) = build_menu(app_handle, &items) {
+        if let Ok(menu) = build_menu(app_handle, items) {
             let _ = tray.set_menu(Some(menu));
         }
     }
 }
 
+/// Refresh tray badge and menu from a single data snapshot to avoid race conditions.
 pub fn refresh_tray(app_handle: &AppHandle, db: &Arc<Database>) {
-    update_tray_badge(app_handle, db);
-    rebuild_tray_menu(app_handle, db);
+    let items = db.get_visible_items().unwrap_or_default();
+    let actionable_count = items
+        .iter()
+        .filter(|i| {
+            matches!(
+                i.status.as_str(),
+                "completed"
+                    | "failed"
+                    | "updated"
+                    | "approved"
+                    | "merged"
+                    | "input_needed"
+            )
+        })
+        .count();
+    update_tray_badge(app_handle, actionable_count);
+    rebuild_tray_menu(app_handle, &items);
 }
