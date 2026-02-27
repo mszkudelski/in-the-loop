@@ -22,6 +22,7 @@ macOS remembers this choice — subsequent launches work normally.
 - 🔔 **System Tray Integration** - Lives in your macOS menu bar
 - 📊 **Unified Dashboard** - Track all your async work items in one place
 - 🔄 **Auto-Polling** - Configurable background checks for updates
+- ✅ **Todo List** - Manage tasks and bind them to tracked items
 - 💬 **Slack Threads** - Monitor thread replies
 - ⚙️ **GitHub Actions** - Track workflow run status
 - 🔀 **Pull Requests** - Watch for reviews and status changes
@@ -98,6 +99,15 @@ The app will automatically:
 - Detect the item type
 - Start polling for updates
 - Show notifications when status changes
+
+### Using Todos
+
+1. Switch to the **Todos** tab
+2. Type a todo title and click "Add"
+3. Toggle completion with the checkbox
+4. **Right-click** a todo to bind it to tracked items (agent sessions, PRs, etc.)
+5. **Right-click** an item in the Items tab to bind it to a todo
+6. Bound item statuses appear as badges on the todo card
 
 ### Using the CLI Wrapper
 
