@@ -66,8 +66,11 @@ export interface Todo {
   status: TodoStatus;
   created_at: string;
   completed_at: string | null;
+  planned_date: string | null;
+  parent_id: string | null;
 }
 
 export interface TodoWithBindings extends Todo {
   bound_items: Item[];
+  subtasks: TodoWithBindings[];
 }
