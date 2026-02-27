@@ -87,6 +87,7 @@ fn main() {
             commands::archive_item,
             commands::archive_items,
             commands::unarchive_item,
+            commands::archive_closed_items,
             commands::archive_stale_items,
             commands::toggle_checked,
             commands::save_credentials,

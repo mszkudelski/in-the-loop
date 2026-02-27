@@ -75,6 +75,13 @@ pub async fn unarchive_item(id: String, app: AppHandle, state: State<'_, AppStat
 }
 
 #[tauri::command]
+pub async fn archive_closed_items(app: AppHandle, state: State<'_, AppState>) -> Result<u64, String> {
+    let count = state.db.archive_closed_items().map_err(|e| e.to_string())?;
+    tray::refresh_tray(&app, &state.db);
+    Ok(count)
+}
+
+#[tauri::command]
 pub async fn archive_stale_items(before: String, app: AppHandle, state: State<'_, AppState>) -> Result<u64, String> {
     let count = state.db.archive_stale_items(&before).map_err(|e| e.to_string())?;
     tray::refresh_tray(&app, &state.db);
