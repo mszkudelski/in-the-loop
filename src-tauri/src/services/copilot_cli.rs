@@ -1,7 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::PathBuf;
+use std::process::Command;
 
 const MAX_TITLE_LEN: usize = 80;
 
@@ -322,6 +323,35 @@ pub fn last_event_timestamp(session_id: &str) -> Option<String> {
         .and_then(|e| e.get("timestamp"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
+}
+
+/// Get the set of working directories where a `copilot` process is currently running.
+/// Uses `lsof` on macOS to inspect the cwd of copilot processes.
+pub fn get_active_copilot_cwds() -> HashSet<String> {
+    let output = Command::new("lsof")
+        .args(["-a", "-d", "cwd", "-c", "copilot", "-Fn"])
+        .output();
+
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        _ => return HashSet::new(),
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .filter_map(|line| line.strip_prefix('n'))
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// Check whether a Copilot CLI session's process is still running.
+/// Compares the session's cwd against the set of active copilot process cwds.
+pub fn is_session_process_running(session: &CopilotSession, active_cwds: &HashSet<String>) -> bool {
+    match &session.cwd {
+        Some(cwd) => active_cwds.contains(cwd),
+        None => false,
+    }
 }
 
 /// Read the last N valid JSON events from an events.jsonl file.
