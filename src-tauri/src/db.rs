@@ -313,6 +313,18 @@ impl Database {
         Ok(count as u64)
     }
 
+    pub fn archive_closed_items(&self) -> Result<u64> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        let count = conn.execute(
+            "UPDATE items SET archived = 1, archived_at = ?1, checked = 0
+             WHERE archived = 0
+               AND status = 'closed'",
+            params![now],
+        )?;
+        Ok(count as u64)
+    }
+
     pub fn archive_stale_items(&self, before: &str) -> Result<u64> {
         let conn = self.conn.lock().unwrap();
         let now = chrono::Utc::now().to_rfc3339();
