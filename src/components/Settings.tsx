@@ -112,15 +112,15 @@ export function Settings() {
         <input
           id="polling-interval"
           type="range"
-          min="15"
+          min="5"
           max="300"
-          step="15"
+          step="5"
           value={pollingInterval}
           onChange={(e) => setPollingInterval(parseInt(e.target.value))}
           style={{ width: '100%' }}
         />
         <div className="range-labels">
-          <span>15s</span>
+          <span>5s</span>
           <span>1min</span>
           <span>5min</span>
         </div>

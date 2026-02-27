@@ -44,8 +44,7 @@ impl PollingManager {
                     _ => {}
                 }
 
-                tray::update_tray_badge(&app_handle, &db);
-                tray::rebuild_tray_menu(&app_handle, &db);
+                tray::refresh_tray(&app_handle, &db);
 
                 time::sleep(Duration::from_secs(interval)).await;
             }
@@ -531,8 +530,8 @@ impl PollingManager {
                 continue;
             }
 
-            let activity = copilot_cli::detect_session_activity(&session.id);
             let process_running = copilot_cli::is_session_process_running(&session, active_cwds);
+            let activity = copilot_cli::detect_session_activity(&session.id, process_running);
 
             let status = if !process_running {
                 "closed"
@@ -543,6 +542,18 @@ impl PollingManager {
                     copilot_cli::SessionActivity::Idle => "waiting",
                 }
             };
+
+            // When a new active session appears at the same CWD, close old sessions there
+            // (handles /new command creating a fresh session in the same directory).
+            if status != "closed" {
+                if let Some(cwd) = &session.cwd {
+                    if let Ok(closed) = db.close_copilot_sessions_at_cwd(cwd, &session.id) {
+                        for closed_id in &closed {
+                            let _ = app_handle.emit("item-updated", closed_id);
+                        }
+                    }
+                }
+            }
 
             // Auto-name: summary > first user message > repository > generic
             let title = session
@@ -610,8 +621,8 @@ impl PollingManager {
         };
 
         // Detect live status from events.jsonl
-        let activity = copilot_cli::detect_session_activity(session_id);
         let process_running = copilot_cli::is_session_process_running(&session, active_cwds);
+        let activity = copilot_cli::detect_session_activity(session_id, process_running);
 
         // If the copilot process is no longer running, the session is closed.
         // If it was already closed and events are still idle, keep it closed
@@ -702,8 +713,8 @@ impl PollingManager {
         if let Some(sid) = metadata["copilot_session_id"].as_str() {
             if let Some(session) = copilot_cli::read_session(sid) {
                 // Detect live status
-                let activity = copilot_cli::detect_session_activity(sid);
                 let process_running = copilot_cli::is_session_process_running(&session, active_cwds);
+                let activity = copilot_cli::detect_session_activity(sid, process_running);
 
                 let new_status = if !process_running {
                     "closed"
@@ -788,8 +799,8 @@ impl PollingManager {
             }
 
             // Detect live status from events.jsonl on first match
-            let activity = copilot_cli::detect_session_activity(&session.id);
             let process_running = copilot_cli::is_session_process_running(&session, active_cwds);
+            let activity = copilot_cli::detect_session_activity(&session.id, process_running);
 
             let new_status = if !process_running {
                 "closed"
