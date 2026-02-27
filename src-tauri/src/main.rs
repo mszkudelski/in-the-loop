@@ -99,6 +99,7 @@ fn main() {
             commands::add_todo,
             commands::get_todos,
             commands::update_todo_status,
+            commands::update_todo_date,
             commands::delete_todo,
             commands::bind_todo_to_item,
             commands::unbind_todo_from_item,

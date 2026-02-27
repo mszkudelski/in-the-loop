@@ -44,6 +44,8 @@ pub struct Todo {
     pub status: String,
     pub created_at: String,
     pub completed_at: Option<String>,
+    pub planned_date: Option<String>,
+    pub parent_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +53,7 @@ pub struct TodoWithBindings {
     #[serde(flatten)]
     pub todo: Todo,
     pub bound_items: Vec<Item>,
+    pub subtasks: Vec<TodoWithBindings>,
 }
 
 pub struct Database {
@@ -132,10 +135,24 @@ impl Database {
                 title TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'open',
                 created_at TEXT NOT NULL,
-                completed_at TEXT
+                completed_at TEXT,
+                planned_date TEXT,
+                parent_id TEXT REFERENCES todos(id) ON DELETE CASCADE
             )",
             [],
         )?;
+
+        // Migration: add planned_date column if missing
+        let has_planned_date = conn.prepare("SELECT planned_date FROM todos LIMIT 0").is_ok();
+        if !has_planned_date {
+            conn.execute("ALTER TABLE todos ADD COLUMN planned_date TEXT", [])?;
+        }
+
+        // Migration: add parent_id column if missing
+        let has_parent_id = conn.prepare("SELECT parent_id FROM todos LIMIT 0").is_ok();
+        if !has_parent_id {
+            conn.execute("ALTER TABLE todos ADD COLUMN parent_id TEXT REFERENCES todos(id) ON DELETE CASCADE", [])?;
+        }
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS todo_item_bindings (
@@ -595,14 +612,16 @@ impl Database {
     pub fn add_todo(&self, todo: &Todo) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO todos (id, title, status, created_at, completed_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO todos (id, title, status, created_at, completed_at, planned_date, parent_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 todo.id,
                 todo.title,
                 todo.status,
                 todo.created_at,
                 todo.completed_at,
+                todo.planned_date,
+                todo.parent_id,
             ],
         )?;
         Ok(())
@@ -611,8 +630,8 @@ impl Database {
     pub fn get_todos(&self) -> Result<Vec<TodoWithBindings>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, title, status, created_at, completed_at
-             FROM todos ORDER BY status ASC, created_at DESC",
+            "SELECT id, title, status, created_at, completed_at, planned_date, parent_id
+             FROM todos WHERE parent_id IS NULL ORDER BY status ASC, created_at DESC",
         )?;
 
         let todos: Vec<Todo> = stmt
@@ -623,47 +642,88 @@ impl Database {
                     status: row.get(2)?,
                     created_at: row.get(3)?,
                     completed_at: row.get(4)?,
+                    planned_date: row.get(5)?,
+                    parent_id: row.get(6)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut result = Vec::new();
         for todo in todos {
-            let mut binding_stmt = conn.prepare(
-                "SELECT i.id, i.type, i.title, i.url, i.status, i.previous_status, i.metadata,
-                        i.last_checked_at, i.last_updated_at, i.created_at, i.archived,
-                        i.polling_interval_override, i.checked, i.archived_at
-                 FROM items i
-                 INNER JOIN todo_item_bindings b ON b.item_id = i.id
-                 WHERE b.todo_id = ?1 AND i.archived = 0",
-            )?;
-            let bound_items = binding_stmt
-                .query_map([&todo.id], |row| {
-                    Ok(Item {
-                        id: row.get(0)?,
-                        item_type: row.get(1)?,
-                        title: row.get(2)?,
-                        url: row.get(3)?,
-                        status: row.get(4)?,
-                        previous_status: row.get(5)?,
-                        metadata: row.get(6)?,
-                        last_checked_at: row.get(7)?,
-                        last_updated_at: row.get(8)?,
-                        created_at: row.get(9)?,
-                        archived: row.get::<_, i32>(10)? != 0,
-                        polling_interval_override: row.get(11)?,
-                        checked: row.get::<_, i32>(12)? != 0,
-                        archived_at: row.get(13)?,
-                    })
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
+            let bound_items = Self::get_bound_items_for_todo(&conn, &todo.id)?;
+            let subtasks = Self::get_subtasks(&conn, &todo.id)?;
 
             result.push(TodoWithBindings {
                 todo,
                 bound_items,
+                subtasks,
             });
         }
 
+        Ok(result)
+    }
+
+    fn get_bound_items_for_todo(conn: &Connection, todo_id: &str) -> Result<Vec<Item>, rusqlite::Error> {
+        let mut binding_stmt = conn.prepare(
+            "SELECT i.id, i.type, i.title, i.url, i.status, i.previous_status, i.metadata,
+                    i.last_checked_at, i.last_updated_at, i.created_at, i.archived,
+                    i.polling_interval_override, i.checked, i.archived_at
+             FROM items i
+             INNER JOIN todo_item_bindings b ON b.item_id = i.id
+             WHERE b.todo_id = ?1 AND i.archived = 0",
+        )?;
+        let items = binding_stmt
+            .query_map([todo_id], |row| {
+                Ok(Item {
+                    id: row.get(0)?,
+                    item_type: row.get(1)?,
+                    title: row.get(2)?,
+                    url: row.get(3)?,
+                    status: row.get(4)?,
+                    previous_status: row.get(5)?,
+                    metadata: row.get(6)?,
+                    last_checked_at: row.get(7)?,
+                    last_updated_at: row.get(8)?,
+                    created_at: row.get(9)?,
+                    archived: row.get::<_, i32>(10)? != 0,
+                    polling_interval_override: row.get(11)?,
+                    checked: row.get::<_, i32>(12)? != 0,
+                    archived_at: row.get(13)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(items)
+    }
+
+    fn get_subtasks(conn: &Connection, parent_id: &str) -> Result<Vec<TodoWithBindings>, rusqlite::Error> {
+        let mut stmt = conn.prepare(
+            "SELECT id, title, status, created_at, completed_at, planned_date, parent_id
+             FROM todos WHERE parent_id = ?1 ORDER BY status ASC, created_at ASC",
+        )?;
+
+        let subtask_todos: Vec<Todo> = stmt
+            .query_map([parent_id], |row| {
+                Ok(Todo {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    status: row.get(2)?,
+                    created_at: row.get(3)?,
+                    completed_at: row.get(4)?,
+                    planned_date: row.get(5)?,
+                    parent_id: row.get(6)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut result = Vec::new();
+        for todo in subtask_todos {
+            let bound_items = Self::get_bound_items_for_todo(conn, &todo.id)?;
+            result.push(TodoWithBindings {
+                todo,
+                bound_items,
+                subtasks: Vec::new(),
+            });
+        }
         Ok(result)
     }
 
@@ -683,8 +743,22 @@ impl Database {
 
     pub fn delete_todo(&self, id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM todo_item_bindings WHERE todo_id IN (SELECT id FROM todos WHERE parent_id = ?1)",
+            params![id],
+        )?;
+        conn.execute("DELETE FROM todos WHERE parent_id = ?1", params![id])?;
         conn.execute("DELETE FROM todo_item_bindings WHERE todo_id = ?1", params![id])?;
         conn.execute("DELETE FROM todos WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn update_todo_date(&self, id: &str, planned_date: Option<&str>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE todos SET planned_date = ?1 WHERE id = ?2",
+            params![planned_date, id],
+        )?;
         Ok(())
     }
 

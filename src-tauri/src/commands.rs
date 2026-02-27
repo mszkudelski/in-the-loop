@@ -214,13 +214,15 @@ pub async fn open_url(url: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn add_todo(title: String, state: State<'_, AppState>) -> Result<Todo, String> {
+pub async fn add_todo(title: String, planned_date: Option<String>, parent_id: Option<String>, state: State<'_, AppState>) -> Result<Todo, String> {
     let todo = Todo {
         id: Uuid::new_v4().to_string(),
         title,
         status: "open".to_string(),
         created_at: chrono::Utc::now().to_rfc3339(),
         completed_at: None,
+        planned_date,
+        parent_id,
     };
     state.db.add_todo(&todo).map_err(|e| e.to_string())?;
     Ok(todo)
@@ -240,6 +242,18 @@ pub async fn update_todo_status(
     state
         .db
         .update_todo_status(&id, &status)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn update_todo_date(
+    id: String,
+    planned_date: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .db
+        .update_todo_date(&id, planned_date.as_deref())
         .map_err(|e| e.to_string())
 }
 
