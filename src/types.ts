@@ -14,6 +14,7 @@ export type ItemStatus =
   | 'approved'
   | 'merged'
   | 'completed' 
+  | 'closed'
   | 'failed'
   | 'archived';
 
@@ -55,4 +56,18 @@ export interface ParsedUrl {
   type: ItemType;
   metadata: Record<string, any>;
   suggested_title: string;
+}
+
+export type TodoStatus = 'open' | 'done';
+
+export interface Todo {
+  id: string;
+  title: string;
+  status: TodoStatus;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface TodoWithBindings extends Todo {
+  bound_items: Item[];
 }

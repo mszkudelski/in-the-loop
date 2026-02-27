@@ -96,7 +96,7 @@ export function Dashboard() {
   };
 
   return (
-    <div className="container">
+    <>
       <div className="header-row">
         <h1 className="page-title">In The Loop</h1>
         <div className="header-actions">
@@ -214,6 +214,6 @@ export function Dashboard() {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

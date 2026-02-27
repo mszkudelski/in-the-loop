@@ -37,6 +37,22 @@ pub struct Settings {
     pub screen_width: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Todo {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub created_at: String,
+    pub completed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TodoWithBindings {
+    #[serde(flatten)]
+    pub todo: Todo,
+    pub bound_items: Vec<Item>,
+}
+
 pub struct Database {
     conn: Arc<Mutex<Connection>>,
 }
@@ -107,6 +123,28 @@ impl Database {
 
         conn.execute(
             "INSERT OR IGNORE INTO settings (key, value) VALUES ('screen_width', '400')",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS todos (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'open',
+                created_at TEXT NOT NULL,
+                completed_at TEXT
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS todo_item_bindings (
+                todo_id TEXT NOT NULL,
+                item_id TEXT NOT NULL,
+                PRIMARY KEY (todo_id, item_id),
+                FOREIGN KEY (todo_id) REFERENCES todos(id) ON DELETE CASCADE,
+                FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+            )",
             [],
         )?;
 
@@ -552,5 +590,130 @@ impl Database {
             polling_interval,
             screen_width,
         })
+    }
+
+    pub fn add_todo(&self, todo: &Todo) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO todos (id, title, status, created_at, completed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                todo.id,
+                todo.title,
+                todo.status,
+                todo.created_at,
+                todo.completed_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_todos(&self) -> Result<Vec<TodoWithBindings>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, title, status, created_at, completed_at
+             FROM todos ORDER BY status ASC, created_at DESC",
+        )?;
+
+        let todos: Vec<Todo> = stmt
+            .query_map([], |row| {
+                Ok(Todo {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    status: row.get(2)?,
+                    created_at: row.get(3)?,
+                    completed_at: row.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut result = Vec::new();
+        for todo in todos {
+            let mut binding_stmt = conn.prepare(
+                "SELECT i.id, i.type, i.title, i.url, i.status, i.previous_status, i.metadata,
+                        i.last_checked_at, i.last_updated_at, i.created_at, i.archived,
+                        i.polling_interval_override, i.checked, i.archived_at
+                 FROM items i
+                 INNER JOIN todo_item_bindings b ON b.item_id = i.id
+                 WHERE b.todo_id = ?1 AND i.archived = 0",
+            )?;
+            let bound_items = binding_stmt
+                .query_map([&todo.id], |row| {
+                    Ok(Item {
+                        id: row.get(0)?,
+                        item_type: row.get(1)?,
+                        title: row.get(2)?,
+                        url: row.get(3)?,
+                        status: row.get(4)?,
+                        previous_status: row.get(5)?,
+                        metadata: row.get(6)?,
+                        last_checked_at: row.get(7)?,
+                        last_updated_at: row.get(8)?,
+                        created_at: row.get(9)?,
+                        archived: row.get::<_, i32>(10)? != 0,
+                        polling_interval_override: row.get(11)?,
+                        checked: row.get::<_, i32>(12)? != 0,
+                        archived_at: row.get(13)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+
+            result.push(TodoWithBindings {
+                todo,
+                bound_items,
+            });
+        }
+
+        Ok(result)
+    }
+
+    pub fn update_todo_status(&self, id: &str, status: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let completed_at = if status == "done" {
+            Some(chrono::Utc::now().to_rfc3339())
+        } else {
+            None
+        };
+        conn.execute(
+            "UPDATE todos SET status = ?1, completed_at = ?2 WHERE id = ?3",
+            params![status, completed_at, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_todo(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM todo_item_bindings WHERE todo_id = ?1", params![id])?;
+        conn.execute("DELETE FROM todos WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn bind_todo_to_item(&self, todo_id: &str, item_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR IGNORE INTO todo_item_bindings (todo_id, item_id) VALUES (?1, ?2)",
+            params![todo_id, item_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn unbind_todo_from_item(&self, todo_id: &str, item_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM todo_item_bindings WHERE todo_id = ?1 AND item_id = ?2",
+            params![todo_id, item_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_todo_ids_for_item(&self, item_id: &str) -> Result<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT todo_id FROM todo_item_bindings WHERE item_id = ?1",
+        )?;
+        let ids = stmt
+            .query_map([item_id], |row| row.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+        Ok(ids)
     }
 }
