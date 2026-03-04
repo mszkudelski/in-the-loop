@@ -35,6 +35,9 @@ pub struct Credentials {
 pub struct Settings {
     pub polling_interval: i64,
     pub screen_width: i64,
+    pub notify_session_started: bool,
+    pub notify_session_ended: bool,
+    pub notify_input_needed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,6 +129,19 @@ impl Database {
 
         conn.execute(
             "INSERT OR IGNORE INTO settings (key, value) VALUES ('screen_width', '400')",
+            [],
+        )?;
+
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES ('notify_session_started', 'true')",
+            [],
+        )?;
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES ('notify_session_ended', 'true')",
+            [],
+        )?;
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES ('notify_input_needed', 'true')",
             [],
         )?;
 
@@ -504,41 +520,6 @@ impl Database {
         Ok(ids)
     }
 
-    /// Close active copilot sessions at the given CWD, excluding a specific session ID.
-    /// Returns the IDs of items that were closed.
-    pub fn close_copilot_sessions_at_cwd(
-        &self,
-        cwd: &str,
-        exclude_session_id: &str,
-    ) -> Result<Vec<String>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, metadata FROM items
-             WHERE type IN ('copilot_agent', 'cli_session')
-               AND status NOT IN ('closed', 'archived')",
-        )?;
-        let candidates: Vec<(String, String)> = stmt
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        let mut closed_ids = Vec::new();
-        for (item_id, meta_str) in candidates {
-            if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&meta_str) {
-                let item_cwd = meta["cwd"].as_str().unwrap_or("");
-                let item_sid = meta["copilot_session_id"].as_str().unwrap_or("");
-                if item_cwd == cwd && item_sid != exclude_session_id {
-                    conn.execute(
-                        "UPDATE items SET previous_status = status, status = 'closed', last_updated_at = datetime('now') WHERE id = ?1",
-                        params![item_id],
-                    )?;
-                    closed_ids.push(item_id);
-                }
-            }
-        }
-        Ok(closed_ids)
-    }
-
     pub fn save_credential(&self, key: &str, value: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -639,9 +620,27 @@ impl Database {
             .parse()
             .unwrap_or(400);
 
+        let notify_session_started = self
+            .get_setting("notify_session_started")?
+            .map(|v| v != "false")
+            .unwrap_or(true);
+
+        let notify_session_ended = self
+            .get_setting("notify_session_ended")?
+            .map(|v| v != "false")
+            .unwrap_or(true);
+
+        let notify_input_needed = self
+            .get_setting("notify_input_needed")?
+            .map(|v| v != "false")
+            .unwrap_or(true);
+
         Ok(Settings {
             polling_interval,
             screen_width,
+            notify_session_started,
+            notify_session_ended,
+            notify_input_needed,
         })
     }
 

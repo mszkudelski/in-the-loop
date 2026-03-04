@@ -386,6 +386,13 @@ button:focus-visible {
   width: 100%;
 }
 
+.checkbox-label {
+  display: flex !important;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
 .range-labels {
   display: flex;
   justify-content: space-between;

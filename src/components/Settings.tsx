@@ -9,6 +9,9 @@ export function Settings() {
   const [opencodePassword, setOpencodePassword] = useState('');
   const [pollingInterval, setPollingInterval] = useState(30);
   const [screenWidth, setScreenWidth] = useState(400);
+  const [notifySessionStarted, setNotifySessionStarted] = useState(true);
+  const [notifySessionEnded, setNotifySessionEnded] = useState(true);
+  const [notifyInputNeeded, setNotifyInputNeeded] = useState(true);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -21,6 +24,9 @@ export function Settings() {
       const settings: SettingsType = await invoke('get_settings');
       setPollingInterval(settings.polling_interval);
       setScreenWidth(settings.screen_width);
+      setNotifySessionStarted(settings.notify_session_started);
+      setNotifySessionEnded(settings.notify_session_ended);
+      setNotifyInputNeeded(settings.notify_input_needed);
     } catch (error) {
       console.error('Failed to load settings:', error);
     }
@@ -40,7 +46,13 @@ export function Settings() {
       
       await invoke('save_credentials', { credentials });
       await invoke('save_settings', { 
-        settings: { polling_interval: pollingInterval, screen_width: screenWidth } 
+        settings: {
+          polling_interval: pollingInterval,
+          screen_width: screenWidth,
+          notify_session_started: notifySessionStarted,
+          notify_session_ended: notifySessionEnded,
+          notify_input_needed: notifyInputNeeded,
+        } 
       });
       
       setMessage('Saved');
@@ -145,6 +157,34 @@ export function Settings() {
           <span>750px</span>
           <span>1200px</span>
         </div>
+      </div>
+
+      <div className="settings-field">
+        <label>Notifications</label>
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={notifySessionStarted}
+            onChange={(e) => setNotifySessionStarted(e.target.checked)}
+          />
+          Session started
+        </label>
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={notifySessionEnded}
+            onChange={(e) => setNotifySessionEnded(e.target.checked)}
+          />
+          Session ended
+        </label>
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={notifyInputNeeded}
+            onChange={(e) => setNotifyInputNeeded(e.target.checked)}
+          />
+          Input needed
+        </label>
       </div>
 
       {message && (
