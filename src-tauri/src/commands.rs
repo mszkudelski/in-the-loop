@@ -161,6 +161,21 @@ pub async fn save_settings(
         .save_setting("screen_width", &settings.screen_width.to_string())
         .map_err(|e| e.to_string())?;
 
+    state
+        .db
+        .save_setting("notify_session_started", &settings.notify_session_started.to_string())
+        .map_err(|e| e.to_string())?;
+
+    state
+        .db
+        .save_setting("notify_session_ended", &settings.notify_session_ended.to_string())
+        .map_err(|e| e.to_string())?;
+
+    state
+        .db
+        .save_setting("notify_input_needed", &settings.notify_input_needed.to_string())
+        .map_err(|e| e.to_string())?;
+
     if let Some(window) = app.get_webview_window("main") {
         let current_size = window.outer_size().map_err(|e| e.to_string())?;
         let new_size = tauri::PhysicalSize::new(settings.screen_width as u32, current_size.height);
