@@ -144,11 +144,11 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 pub fn update_tray_badge(app_handle: &AppHandle, actionable_count: usize) {
     if let Some(tray) = app_handle.tray_by_id(TRAY_ID) {
         let title = if actionable_count > 0 {
-            Some(actionable_count.to_string())
+            actionable_count.to_string()
         } else {
-            None
+            String::new()
         };
-        let _ = tray.set_title(title.as_deref());
+        let _ = tray.set_title(Some(title.as_str()));
     }
 }
 

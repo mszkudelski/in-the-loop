@@ -23,10 +23,6 @@ export function Dashboard() {
     return () => {
       unlisten.then(fn => fn());
     };
-  }, []);
-
-  useEffect(() => {
-    loadItems();
   }, [showArchived]);
 
   const loadItems = async () => {
@@ -45,7 +41,7 @@ export function Dashboard() {
   const handleArchive = async (id: string) => {
     try {
       await invoke('archive_item', { id });
-      setItems(items.filter(item => item.id !== id));
+      setItems(prev => prev.filter(item => item.id !== id));
     } catch (error) {
       console.error('Failed to archive item:', error);
     }
@@ -54,7 +50,7 @@ export function Dashboard() {
   const handleUnarchive = async (id: string) => {
     try {
       await invoke('unarchive_item', { id });
-      setItems(items.filter(item => item.id !== id));
+      setShowArchived(false);
     } catch (error) {
       console.error('Failed to unarchive item:', error);
     }
