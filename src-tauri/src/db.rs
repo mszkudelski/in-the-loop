@@ -236,19 +236,37 @@ impl Database {
         let mut stmt = conn.prepare("SELECT status FROM items WHERE id = ?1")?;
         let current_status: String = stmt.query_row([id], |row| row.get(0))?;
 
+        let status_changed = status != current_status;
+
+        // Only bump last_updated_at when the status actually changes;
+        // always bump last_checked_at so we know the item was polled.
         if let Some(meta) = metadata {
-            conn.execute(
-                "UPDATE items SET status = ?1, previous_status = ?2, 
-                 last_checked_at = ?3, last_updated_at = ?3, metadata = ?4
-                 WHERE id = ?5",
-                params![status, current_status, now, meta, id],
-            )?;
-        } else {
+            if status_changed {
+                conn.execute(
+                    "UPDATE items SET status = ?1, previous_status = ?2, 
+                     last_checked_at = ?3, last_updated_at = ?3, metadata = ?4
+                     WHERE id = ?5",
+                    params![status, current_status, now, meta, id],
+                )?;
+            } else {
+                conn.execute(
+                    "UPDATE items SET last_checked_at = ?1, metadata = ?2
+                     WHERE id = ?3",
+                    params![now, meta, id],
+                )?;
+            }
+        } else if status_changed {
             conn.execute(
                 "UPDATE items SET status = ?1, previous_status = ?2,
                  last_checked_at = ?3, last_updated_at = ?3
                  WHERE id = ?4",
                 params![status, current_status, now, id],
+            )?;
+        } else {
+            conn.execute(
+                "UPDATE items SET last_checked_at = ?1
+                 WHERE id = ?2",
+                params![now, id],
             )?;
         }
         Ok(())
@@ -364,6 +382,24 @@ impl Database {
         let count = conn.execute(
             "DELETE FROM items WHERE archived = 1 AND archived_at IS NOT NULL AND archived_at < ?1",
             params![cutoff],
+        )?;
+        Ok(count as u64)
+    }
+
+    /// Auto-archive copilot_agent and cli_session items that have been closed
+    /// for longer than the specified number of minutes.
+    pub fn auto_archive_old_closed(&self, closed_minutes: i64) -> Result<u64> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        let cutoff = (chrono::Utc::now() - chrono::Duration::minutes(closed_minutes)).to_rfc3339();
+        let count = conn.execute(
+            "UPDATE items SET archived = 1, archived_at = ?1, checked = 0
+             WHERE archived = 0
+               AND status = 'closed'
+               AND type IN ('copilot_agent', 'cli_session')
+               AND last_updated_at IS NOT NULL
+               AND last_updated_at < ?2",
+            params![now, cutoff],
         )?;
         Ok(count as u64)
     }

@@ -44,6 +44,15 @@ impl PollingManager {
                     _ => {}
                 }
 
+                // Auto-archive copilot/CLI sessions closed for over 1 hour
+                match db.auto_archive_old_closed(60) {
+                    Ok(count) if count > 0 => {
+                        eprintln!("Auto-archived {} old closed sessions", count);
+                    }
+                    Err(e) => eprintln!("Error auto-archiving closed sessions: {}", e),
+                    _ => {}
+                }
+
                 tray::refresh_tray(&app_handle, &db);
 
                 time::sleep(Duration::from_secs(interval)).await;
