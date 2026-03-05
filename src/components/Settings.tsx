@@ -12,6 +12,8 @@ export function Settings() {
   const [notifySessionStarted, setNotifySessionStarted] = useState(true);
   const [notifySessionEnded, setNotifySessionEnded] = useState(true);
   const [notifyInputNeeded, setNotifyInputNeeded] = useState(true);
+  const [addItemShortcut, setAddItemShortcut] = useState('Ctrl+Shift+Q');
+  const [recordingShortcut, setRecordingShortcut] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -27,6 +29,9 @@ export function Settings() {
       setNotifySessionStarted(settings.notify_session_started);
       setNotifySessionEnded(settings.notify_session_ended);
       setNotifyInputNeeded(settings.notify_input_needed);
+
+      const shortcut: string = await invoke('get_add_item_shortcut');
+      setAddItemShortcut(shortcut);
     } catch (error) {
       console.error('Failed to load settings:', error);
     }
@@ -54,6 +59,8 @@ export function Settings() {
           notify_input_needed: notifyInputNeeded,
         } 
       });
+
+      await invoke('update_add_item_shortcut', { shortcutStr: addItemShortcut });
       
       setMessage('Saved');
       setSlackToken('');
@@ -157,6 +164,49 @@ export function Settings() {
           <span>750px</span>
           <span>1200px</span>
         </div>
+      </div>
+
+      <div className="settings-field">
+        <label htmlFor="add-item-shortcut">
+          Add Item Shortcut
+        </label>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <input
+            id="add-item-shortcut"
+            type="text"
+            className="form-input"
+            value={recordingShortcut ? 'Press shortcut...' : addItemShortcut}
+            readOnly
+            onKeyDown={(e) => {
+              if (!recordingShortcut) return;
+              e.preventDefault();
+              const key = e.key;
+              if (['Shift', 'Control', 'Alt', 'Meta'].includes(key)) return;
+
+              const parts: string[] = [];
+              if (e.metaKey) parts.push('Super');
+              if (e.ctrlKey) parts.push('Control');
+              if (e.altKey) parts.push('Alt');
+              if (e.shiftKey) parts.push('Shift');
+              parts.push(key.length === 1 ? key.toUpperCase() : key);
+
+              setAddItemShortcut(parts.join('+'));
+              setRecordingShortcut(false);
+            }}
+            onBlur={() => setRecordingShortcut(false)}
+            style={{ flex: 1 }}
+          />
+          <button
+            type="button"
+            onClick={() => setRecordingShortcut(!recordingShortcut)}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            {recordingShortcut ? 'Cancel' : 'Record'}
+          </button>
+        </div>
+        <span style={{ fontSize: '0.8em', opacity: 0.7 }}>
+          Copy a URL, press this shortcut to add it
+        </span>
       </div>
 
       <div className="settings-field">
