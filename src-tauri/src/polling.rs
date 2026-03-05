@@ -8,6 +8,23 @@ use tauri::{AppHandle, Emitter};
 use tauri_plugin_notification::NotificationExt;
 use tokio::time;
 
+enum NotificationCategory {
+    SessionStarted,
+    SessionEnded,
+    InputNeeded,
+}
+
+fn classify_notification(old_status: &str, new_status: &str) -> Option<(&'static str, NotificationCategory)> {
+    match (old_status, new_status) {
+        ("in_progress", "input_needed") => Some(("Waiting for your input", NotificationCategory::InputNeeded)),
+        ("in_progress", "completed") => Some(("Agent finished working", NotificationCategory::SessionEnded)),
+        ("in_progress", "closed") => Some(("Session closed", NotificationCategory::SessionEnded)),
+        (_, "archived") => Some(("Session has been archived", NotificationCategory::SessionEnded)),
+        ("input_needed" | "completed" | "closed", "in_progress") => Some(("Agent started working", NotificationCategory::SessionStarted)),
+        _ => None,
+    }
+}
+
 pub struct PollingManager {
     db: Arc<Database>,
     app_handle: AppHandle,
@@ -41,6 +58,15 @@ impl PollingManager {
                         eprintln!("Cleaned up {} old archived items", count);
                     }
                     Err(e) => eprintln!("Error cleaning up archived items: {}", e),
+                    _ => {}
+                }
+
+                // Auto-archive copilot/CLI sessions closed for over 1 hour
+                match db.auto_archive_old_closed(60) {
+                    Ok(count) if count > 0 => {
+                        eprintln!("Auto-archived {} old closed sessions", count);
+                    }
+                    Err(e) => eprintln!("Error auto-archiving closed sessions: {}", e),
                     _ => {}
                 }
 
@@ -112,12 +138,12 @@ impl PollingManager {
         Ok(())
     }
 
-    fn is_permanent_github_error(_item_type: &str, _error: &str) -> bool {
-        // Never mark items as "failed" due to polling/API errors.
-        // "failed" should only come from the actual GitHub conclusion (failure/cancelled).
-        // Auth errors (401/403) can be resolved by the user re-configuring the token,
-        // and 404 may be a temporary SSO issue. The error is still stored in metadata.
-        false
+    fn is_permanent_github_error(item_type: &str, error: &str) -> bool {
+        // A 404 for a GitHub Action run means the run doesn't exist (deleted or wrong URL).
+        // "failed" items are still re-polled, so they recover automatically if the 404
+        // was transient (e.g. temporary SSO issue).
+        // Auth errors (401/403) can be resolved by the user re-configuring the token.
+        item_type == "github_action" && error.contains("404 Not Found")
     }
 
     async fn poll_slack_thread(db: &Arc<Database>, item: &crate::db::Item) -> anyhow::Result<()> {
@@ -485,21 +511,20 @@ impl PollingManager {
         db.update_item_status(&item.id, new_status, Some(&new_metadata))?;
 
         if new_status != item.status {
-            let notification_body = match (item.status.as_str(), new_status) {
-                ("in_progress", "input_needed") => Some("Waiting for your input"),
-                ("in_progress", "completed") => Some("Agent finished working"),
-                (_, "archived") => Some("Session has been archived"),
-                ("input_needed" | "completed", "in_progress") => Some("Agent started working"),
-                _ => None,
-            };
-
-            if let Some(body) = notification_body {
-                let _ = app_handle
-                    .notification()
-                    .builder()
-                    .title(&item.title)
-                    .body(body)
-                    .show();
+            if let Some((body, category)) = classify_notification(item.status.as_str(), new_status) {
+                let should_notify = match category {
+                    NotificationCategory::SessionStarted => db.get_setting("notify_session_started").ok().flatten().map(|v| v != "false").unwrap_or(true),
+                    NotificationCategory::SessionEnded => db.get_setting("notify_session_ended").ok().flatten().map(|v| v != "false").unwrap_or(true),
+                    NotificationCategory::InputNeeded => db.get_setting("notify_input_needed").ok().flatten().map(|v| v != "false").unwrap_or(true),
+                };
+                if should_notify {
+                    let _ = app_handle
+                        .notification()
+                        .builder()
+                        .title(&item.title)
+                        .body(body)
+                        .show();
+                }
             }
         }
 
@@ -542,18 +567,6 @@ impl PollingManager {
                     copilot_cli::SessionActivity::Idle => "waiting",
                 }
             };
-
-            // When a new active session appears at the same CWD, close old sessions there
-            // (handles /new command creating a fresh session in the same directory).
-            if status != "closed" {
-                if let Some(cwd) = &session.cwd {
-                    if let Ok(closed) = db.close_copilot_sessions_at_cwd(cwd, &session.id) {
-                        for closed_id in &closed {
-                            let _ = app_handle.emit("item-updated", closed_id);
-                        }
-                    }
-                }
-            }
 
             // Auto-name: summary > first user message > repository > generic
             let title = session
@@ -665,21 +678,20 @@ impl PollingManager {
 
         // Notifications on status transitions (following OpenCode pattern)
         if new_status != item.status {
-            let notification_body = match (item.status.as_str(), new_status) {
-                ("in_progress", "input_needed") => Some("Waiting for your input"),
-                ("in_progress", "completed") => Some("Agent finished working"),
-                ("in_progress", "closed") => Some("Session closed"),
-                ("input_needed" | "completed" | "closed", "in_progress") => Some("Agent started working"),
-                _ => None,
-            };
-
-            if let Some(body) = notification_body {
-                let _ = app_handle
-                    .notification()
-                    .builder()
-                    .title(&item.title)
-                    .body(body)
-                    .show();
+            if let Some((body, category)) = classify_notification(item.status.as_str(), new_status) {
+                let should_notify = match category {
+                    NotificationCategory::SessionStarted => db.get_setting("notify_session_started").ok().flatten().map(|v| v != "false").unwrap_or(true),
+                    NotificationCategory::SessionEnded => db.get_setting("notify_session_ended").ok().flatten().map(|v| v != "false").unwrap_or(true),
+                    NotificationCategory::InputNeeded => db.get_setting("notify_input_needed").ok().flatten().map(|v| v != "false").unwrap_or(true),
+                };
+                if should_notify {
+                    let _ = app_handle
+                        .notification()
+                        .builder()
+                        .title(&item.title)
+                        .body(body)
+                        .show();
+                }
             }
         }
 
@@ -750,22 +762,20 @@ impl PollingManager {
 
                 // Notifications on status transitions
                 if new_status != item.status {
-                    let notification_body = match (item.status.as_str(), new_status) {
-                        ("in_progress", "input_needed") => Some("Waiting for your input"),
-                        ("in_progress", "completed") => Some("Agent finished working"),
-                        ("in_progress", "closed") => Some("Session closed"),
-                        ("input_needed" | "completed" | "closed", "in_progress") => {
-                            Some("Agent started working")
+                    if let Some((body, category)) = classify_notification(item.status.as_str(), new_status) {
+                        let should_notify = match category {
+                            NotificationCategory::SessionStarted => db.get_setting("notify_session_started").ok().flatten().map(|v| v != "false").unwrap_or(true),
+                            NotificationCategory::SessionEnded => db.get_setting("notify_session_ended").ok().flatten().map(|v| v != "false").unwrap_or(true),
+                            NotificationCategory::InputNeeded => db.get_setting("notify_input_needed").ok().flatten().map(|v| v != "false").unwrap_or(true),
+                        };
+                        if should_notify {
+                            let _ = app_handle
+                                .notification()
+                                .builder()
+                                .title(&item.title)
+                                .body(body)
+                                .show();
                         }
-                        _ => None,
-                    };
-                    if let Some(body) = notification_body {
-                        let _ = app_handle
-                            .notification()
-                            .builder()
-                            .title(&item.title)
-                            .body(body)
-                            .show();
                     }
                 }
 

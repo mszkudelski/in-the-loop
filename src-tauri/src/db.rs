@@ -35,6 +35,9 @@ pub struct Credentials {
 pub struct Settings {
     pub polling_interval: i64,
     pub screen_width: i64,
+    pub notify_session_started: bool,
+    pub notify_session_ended: bool,
+    pub notify_input_needed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,6 +129,19 @@ impl Database {
 
         conn.execute(
             "INSERT OR IGNORE INTO settings (key, value) VALUES ('screen_width', '400')",
+            [],
+        )?;
+
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES ('notify_session_started', 'true')",
+            [],
+        )?;
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES ('notify_session_ended', 'true')",
+            [],
+        )?;
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES ('notify_input_needed', 'true')",
             [],
         )?;
 
@@ -236,19 +252,37 @@ impl Database {
         let mut stmt = conn.prepare("SELECT status FROM items WHERE id = ?1")?;
         let current_status: String = stmt.query_row([id], |row| row.get(0))?;
 
+        let status_changed = status != current_status;
+
+        // Only bump last_updated_at when the status actually changes;
+        // always bump last_checked_at so we know the item was polled.
         if let Some(meta) = metadata {
-            conn.execute(
-                "UPDATE items SET status = ?1, previous_status = ?2, 
-                 last_checked_at = ?3, last_updated_at = ?3, metadata = ?4
-                 WHERE id = ?5",
-                params![status, current_status, now, meta, id],
-            )?;
-        } else {
+            if status_changed {
+                conn.execute(
+                    "UPDATE items SET status = ?1, previous_status = ?2, 
+                     last_checked_at = ?3, last_updated_at = ?3, metadata = ?4
+                     WHERE id = ?5",
+                    params![status, current_status, now, meta, id],
+                )?;
+            } else {
+                conn.execute(
+                    "UPDATE items SET last_checked_at = ?1, metadata = ?2
+                     WHERE id = ?3",
+                    params![now, meta, id],
+                )?;
+            }
+        } else if status_changed {
             conn.execute(
                 "UPDATE items SET status = ?1, previous_status = ?2,
                  last_checked_at = ?3, last_updated_at = ?3
                  WHERE id = ?4",
                 params![status, current_status, now, id],
+            )?;
+        } else {
+            conn.execute(
+                "UPDATE items SET last_checked_at = ?1
+                 WHERE id = ?2",
+                params![now, id],
             )?;
         }
         Ok(())
@@ -368,6 +402,24 @@ impl Database {
         Ok(count as u64)
     }
 
+    /// Auto-archive copilot_agent and cli_session items that have been closed
+    /// for longer than the specified number of minutes.
+    pub fn auto_archive_old_closed(&self, closed_minutes: i64) -> Result<u64> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        let cutoff = (chrono::Utc::now() - chrono::Duration::minutes(closed_minutes)).to_rfc3339();
+        let count = conn.execute(
+            "UPDATE items SET archived = 1, archived_at = ?1, checked = 0
+             WHERE archived = 0
+               AND status = 'closed'
+               AND type IN ('copilot_agent', 'cli_session')
+               AND last_updated_at IS NOT NULL
+               AND last_updated_at < ?2",
+            params![now, cutoff],
+        )?;
+        Ok(count as u64)
+    }
+
     pub fn archive_closed_items(&self) -> Result<u64> {
         let conn = self.conn.lock().unwrap();
         let now = chrono::Utc::now().to_rfc3339();
@@ -466,41 +518,6 @@ impl Database {
             })
             .collect();
         Ok(ids)
-    }
-
-    /// Close active copilot sessions at the given CWD, excluding a specific session ID.
-    /// Returns the IDs of items that were closed.
-    pub fn close_copilot_sessions_at_cwd(
-        &self,
-        cwd: &str,
-        exclude_session_id: &str,
-    ) -> Result<Vec<String>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, metadata FROM items
-             WHERE type IN ('copilot_agent', 'cli_session')
-               AND status NOT IN ('closed', 'archived')",
-        )?;
-        let candidates: Vec<(String, String)> = stmt
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        let mut closed_ids = Vec::new();
-        for (item_id, meta_str) in candidates {
-            if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&meta_str) {
-                let item_cwd = meta["cwd"].as_str().unwrap_or("");
-                let item_sid = meta["copilot_session_id"].as_str().unwrap_or("");
-                if item_cwd == cwd && item_sid != exclude_session_id {
-                    conn.execute(
-                        "UPDATE items SET previous_status = status, status = 'closed', last_updated_at = datetime('now') WHERE id = ?1",
-                        params![item_id],
-                    )?;
-                    closed_ids.push(item_id);
-                }
-            }
-        }
-        Ok(closed_ids)
     }
 
     pub fn save_credential(&self, key: &str, value: &str) -> Result<()> {
@@ -603,9 +620,27 @@ impl Database {
             .parse()
             .unwrap_or(400);
 
+        let notify_session_started = self
+            .get_setting("notify_session_started")?
+            .map(|v| v != "false")
+            .unwrap_or(true);
+
+        let notify_session_ended = self
+            .get_setting("notify_session_ended")?
+            .map(|v| v != "false")
+            .unwrap_or(true);
+
+        let notify_input_needed = self
+            .get_setting("notify_input_needed")?
+            .map(|v| v != "false")
+            .unwrap_or(true);
+
         Ok(Settings {
             polling_interval,
             screen_width,
+            notify_session_started,
+            notify_session_ended,
+            notify_input_needed,
         })
     }
 

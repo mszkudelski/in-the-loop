@@ -1,16 +1,35 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use in_the_loop_lib::{commands, db, local_server, polling, tray};
+use in_the_loop_lib::{commands, db, local_server, polling, shortcut, tray};
 use std::sync::Arc;
 use tauri::{Manager, WindowEvent};
 use tokio::sync::Mutex;
 
 fn main() {
+    // Read shortcut setting from DB before building the app
+    // so we can register it via the plugin builder (avoids deadlock)
+    let initial_shortcut = {
+        let app_dir = dirs::data_dir()
+            .map(|d| d.join("com.intheloop.app"))
+            .unwrap_or_default();
+        let db_path = app_dir.join("in-the-loop.db");
+        if db_path.exists() {
+            db::Database::new(db_path)
+                .ok()
+                .and_then(|database| database.get_setting("add_item_shortcut").ok().flatten())
+                .unwrap_or_else(|| shortcut::DEFAULT_SHORTCUT.to_string())
+        } else {
+            shortcut::DEFAULT_SHORTCUT.to_string()
+        }
+    };
+
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_process::init());
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_clipboard_manager::init());
 
     // Register the updater plugin on desktop only
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -19,7 +38,7 @@ fn main() {
     }
 
     builder
-        .setup(|app| {
+        .setup(move |app| {
             // Manage PendingUpdate state (desktop only)
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             app.manage(in_the_loop_lib::updater::PendingUpdate(Mutex::new(None)));
@@ -59,6 +78,22 @@ fn main() {
 
             // Setup system tray
             tray::setup_tray(app)?;
+
+            // Prompt for accessibility permission once (required for global shortcuts on macOS)
+            if database.get_setting("accessibility_prompted").ok().flatten().is_none() {
+                shortcut::ensure_accessibility();
+                let _ = database.save_setting("accessibility_prompted", "true");
+            }
+
+            // Register global shortcut after a delay to ensure the event loop is running
+            let app_handle = app.handle().clone();
+            let shortcut_str = initial_shortcut.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                if let Err(e) = shortcut::register_shortcut(&app_handle, &shortcut_str) {
+                    eprintln!("Failed to register global shortcut: {}", e);
+                }
+            });
 
             if let Ok(settings) = database.get_all_settings() {
                 if let Some(window) = app.get_webview_window("main") {
@@ -104,6 +139,8 @@ fn main() {
             commands::bind_todo_to_item,
             commands::unbind_todo_from_item,
             commands::get_todo_ids_for_item,
+            commands::get_add_item_shortcut,
+            commands::update_add_item_shortcut,
             in_the_loop_lib::updater::fetch_update,
             in_the_loop_lib::updater::install_update,
         ])
