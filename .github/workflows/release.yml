@@ -90,10 +90,44 @@ jobs:
           git commit -m "chore: release ${TAG_NAME}"
           git push
 
+          # Generate release notes from conventional commits
+          NOTES="## What's Changed"$'\n'
+          FEATS=""
+          FIXES=""
+          OTHERS=""
+
+          while IFS= read -r msg; do
+            # Skip chore/docs/style/ci commits and merge commits
+            [[ "$msg" =~ ^(chore|docs|style|ci|test|build)\( ]] && continue
+            [[ "$msg" =~ ^(chore|docs|style|ci|test|build): ]] && continue
+            [[ "$msg" =~ ^Merge\  ]] && continue
+            [[ "$msg" =~ ^release: ]] && continue
+
+            if [[ "$msg" =~ ^feat ]]; then
+              FEATS+="- ${msg}"$'\n'
+            elif [[ "$msg" =~ ^fix ]]; then
+              FIXES+="- ${msg}"$'\n'
+            elif [[ "$msg" =~ ^(refactor|perf) ]]; then
+              OTHERS+="- ${msg}"$'\n'
+            fi
+          done <<< "$COMMITS"
+
+          if [ -n "$FEATS" ]; then
+            NOTES+=$'\n'"### Features"$'\n'"$FEATS"
+          fi
+          if [ -n "$FIXES" ]; then
+            NOTES+=$'\n'"### Bug Fixes"$'\n'"$FIXES"
+          fi
+          if [ -n "$OTHERS" ]; then
+            NOTES+=$'\n'"### Other Changes"$'\n'"$OTHERS"
+          fi
+
+          NOTES+=$'\n'"**Full Changelog**: https://github.com/${{ github.repository }}/compare/${LATEST_TAG}...${TAG_NAME}"
+
           # Create GitHub Release (also creates the git tag)
           gh release create "$TAG_NAME" \
             --title "In The Loop ${TAG_NAME}" \
-            --generate-notes \
+            --notes "$NOTES" \
             --target main
 
           echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
