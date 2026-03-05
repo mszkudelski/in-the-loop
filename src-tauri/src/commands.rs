@@ -1,5 +1,6 @@
 use crate::db::{Credentials, Database, Item, Settings, Todo, TodoWithBindings};
 use crate::services::url_parser;
+use crate::shortcut;
 use crate::tray;
 use anyhow::Result;
 use std::sync::Arc;
@@ -310,4 +311,21 @@ pub async fn get_todo_ids_for_item(
         .db
         .get_todo_ids_for_item(&item_id)
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_add_item_shortcut(state: State<'_, AppState>) -> Result<String, String> {
+    state
+        .db
+        .get_setting("add_item_shortcut")
+        .map_err(|e| e.to_string())
+        .map(|v| v.unwrap_or_else(|| "Ctrl+Shift+Q".to_string()))
+}
+
+#[tauri::command]
+pub async fn update_add_item_shortcut(
+    shortcut_str: String,
+    app: AppHandle,
+) -> Result<(), String> {
+    shortcut::update_shortcut(&app, &shortcut_str)
 }
