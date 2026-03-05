@@ -112,12 +112,12 @@ impl PollingManager {
         Ok(())
     }
 
-    fn is_permanent_github_error(_item_type: &str, _error: &str) -> bool {
-        // Never mark items as "failed" due to polling/API errors.
-        // "failed" should only come from the actual GitHub conclusion (failure/cancelled).
-        // Auth errors (401/403) can be resolved by the user re-configuring the token,
-        // and 404 may be a temporary SSO issue. The error is still stored in metadata.
-        false
+    fn is_permanent_github_error(item_type: &str, error: &str) -> bool {
+        // A 404 for a GitHub Action run means the run doesn't exist (deleted or wrong URL).
+        // "failed" items are still re-polled, so they recover automatically if the 404
+        // was transient (e.g. temporary SSO issue).
+        // Auth errors (401/403) can be resolved by the user re-configuring the token.
+        item_type == "github_action" && error.contains("404 Not Found")
     }
 
     async fn poll_slack_thread(db: &Arc<Database>, item: &crate::db::Item) -> anyhow::Result<()> {
