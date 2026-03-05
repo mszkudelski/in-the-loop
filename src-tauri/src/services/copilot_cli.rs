@@ -184,11 +184,33 @@ pub fn detect_session_activity(session_id: &str, process_running: bool) -> Sessi
     };
 
     let events_file = base.join(session_id).join("events.jsonl");
-    let recent_events = match read_tail_events(&events_file, 10) {
+    let recent_events = match read_tail_events(&events_file, 30) {
         Some(e) if !e.is_empty() => e,
-        _ => return SessionActivity::Idle,
+        _ => {
+            // If we can't read events but the process is still running,
+            // assume the agent is active (e.g. during compaction the file
+            // may be temporarily empty/rewritten).
+            if process_running {
+                return SessionActivity::InProgress;
+            }
+            return SessionActivity::Idle;
+        }
     };
 
+    classify_events(&recent_events, process_running)
+}
+
+/// Threshold (seconds) after which an active turn with no new events
+/// is considered to be waiting for user confirmation.
+/// Model thinking is typically <30s; 60s strongly suggests a confirmation prompt.
+const TOOL_CONFIRMATION_THRESHOLD_SECS: i64 = 60;
+
+/// Threshold (seconds) for workspace trust prompt detection.
+/// If session started but no user.message exists after this time, likely a trust prompt.
+const WORKSPACE_TRUST_THRESHOLD_SECS: i64 = 15;
+
+/// Core classification logic, extracted for testability.
+fn classify_events(recent_events: &[serde_json::Value], process_running: bool) -> SessionActivity {
     // Check if task_complete was called in recent events → session is done
     let has_task_complete = recent_events.iter().any(|e| {
         e.get("type").and_then(|v| v.as_str()) == Some("tool.execution_start")
@@ -208,6 +230,15 @@ pub fn detect_session_activity(session_id: &str, process_running: bool) -> Sessi
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
+    let last_event_age_secs = last_event
+        .get("timestamp")
+        .and_then(|v| v.as_str())
+        .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
+        .map(|ts| chrono::Utc::now().signed_duration_since(ts).num_seconds())
+        .unwrap_or(i64::MAX);
+
+    let is_stale = last_event_age_secs > 120; // 2 minutes
+
     // Check if a tool execution is actually waiting for user input (e.g. ask_user)
     let is_user_input_tool = event_type == "tool.execution_start"
         && last_event
@@ -217,51 +248,84 @@ pub fn detect_session_activity(session_id: &str, process_running: bool) -> Sessi
             .map(|name| name == "ask_user" || name == "askUser")
             .unwrap_or(false);
 
-    // Check if the assistant proposed tool calls waiting for user confirmation
-    let has_tool_requests = event_type == "assistant.message"
-        && last_event
-            .get("data")
-            .and_then(|d| d.get("toolRequests"))
-            .and_then(|v| v.as_array())
-            .map(|arr| !arr.is_empty())
-            .unwrap_or(false);
+    if is_user_input_tool {
+        return if process_running || !is_stale {
+            SessionActivity::InputNeeded
+        } else {
+            SessionActivity::Idle
+        };
+    }
 
-    let is_stale = last_event
-        .get("timestamp")
-        .and_then(|v| v.as_str())
-        .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
-        .map(|ts| {
-            let age = chrono::Utc::now().signed_duration_since(ts);
-            age > chrono::Duration::minutes(2)
-        })
-        .unwrap_or(true);
+    // Check if we're in an active turn (turn_start without matching turn_end)
+    let in_active_turn = {
+        let last_turn_start = recent_events
+            .iter()
+            .rposition(|e| e.get("type").and_then(|v| v.as_str()) == Some("assistant.turn_start"));
+        let last_turn_end = recent_events
+            .iter()
+            .rposition(|e| e.get("type").and_then(|v| v.as_str()) == Some("assistant.turn_end"));
+        match (last_turn_start, last_turn_end) {
+            (Some(start), Some(end)) => start > end,
+            (Some(_), None) => true,
+            _ => false,
+        }
+    };
+
+    // Heuristic: CLI tool confirmation prompt ("Do you want to run this command?")
+    //
+    // The CLI buffers events — assistant.message and tool.execution_start are written
+    // together AFTER the user confirms. During the confirmation prompt, events.jsonl
+    // still shows the previous step's events (e.g. tool.execution_complete or
+    // assistant.turn_start). We detect this by checking if significant time has passed
+    // since the last event while we're in an active turn and no tool is actively running.
+    let is_actively_executing = matches!(
+        event_type,
+        "tool.execution_start" | "subagent.started" | "session.compaction_start"
+    );
+    if process_running
+        && in_active_turn
+        && !is_actively_executing
+        && last_event_age_secs > TOOL_CONFIRMATION_THRESHOLD_SECS
+    {
+        return SessionActivity::InputNeeded;
+    }
+
+    // Heuristic: workspace trust prompt ("Do you want to add these directories?")
+    //
+    // This prompt appears BEFORE any agent activity — no user.message exists yet
+    // and no assistant turns have started. If the process is running but no
+    // interaction has started after a short delay, the CLI is likely waiting
+    // for trust confirmation.
+    let has_user_message = recent_events
+        .iter()
+        .any(|e| e.get("type").and_then(|v| v.as_str()) == Some("user.message"));
+    let has_agent_activity = recent_events.iter().any(|e| {
+        let t = e.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        matches!(
+            t,
+            "assistant.turn_start"
+                | "assistant.message"
+                | "assistant.turn_end"
+                | "tool.execution_start"
+                | "tool.execution_complete"
+                | "session.compaction_start"
+                | "session.compaction_complete"
+        )
+    });
+    if process_running
+        && !has_user_message
+        && !has_agent_activity
+        && last_event_age_secs > WORKSPACE_TRUST_THRESHOLD_SECS
+    {
+        return SessionActivity::InputNeeded;
+    }
 
     match event_type {
-        // tool.execution_start for ask_user means waiting for user input.
-        // Stay InputNeeded as long as the process is alive — user may take a while.
-        "tool.execution_start" if is_user_input_tool => {
-            if process_running || !is_stale {
-                SessionActivity::InputNeeded
-            } else {
-                SessionActivity::Idle
-            }
-        }
-
-        // assistant.message with toolRequests means the agent proposed tool calls
-        // and is waiting for user confirmation (unless Brave Mode is on).
-        // Stay InputNeeded as long as the process is alive.
-        "assistant.message" if has_tool_requests => {
-            if process_running || !is_stale {
-                SessionActivity::InputNeeded
-            } else {
-                SessionActivity::Idle
-            }
-        }
-
         // Agent is actively generating/working
         "assistant.turn_start" | "assistant.message" | "tool.execution_start"
         | "tool.execution_complete" | "subagent.started" | "subagent.completed"
-        | "session.mode_changed" | "session.context_changed" => {
+        | "session.mode_changed" | "session.context_changed"
+        | "session.compaction_start" | "session.compaction_complete" => {
             if is_stale {
                 SessionActivity::Idle
             } else {
@@ -269,8 +333,7 @@ pub fn detect_session_activity(session_id: &str, process_running: bool) -> Sessi
             }
         }
 
-        // Agent finished a turn — treat as idle (not input needed).
-        // Only explicit ask_user tool calls indicate the agent needs user input.
+        // Agent finished a turn — treat as idle
         "assistant.turn_end" => SessionActivity::Idle,
 
         // User just sent a message — agent will start soon
@@ -407,5 +470,226 @@ fn read_tail_events(path: &PathBuf, count: usize) -> Option<Vec<serde_json::Valu
         None
     } else {
         Some(events)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn now_ts() -> String {
+        chrono::Utc::now().to_rfc3339()
+    }
+
+    /// Create a timestamp N seconds in the past.
+    fn past_ts(seconds_ago: i64) -> String {
+        (chrono::Utc::now() - chrono::Duration::seconds(seconds_ago)).to_rfc3339()
+    }
+
+    fn make_event(event_type: &str, ts: &str) -> serde_json::Value {
+        json!({"type": event_type, "timestamp": ts, "data": {}})
+    }
+
+    fn make_tool_start(tool_name: &str, ts: &str) -> serde_json::Value {
+        json!({
+            "type": "tool.execution_start",
+            "timestamp": ts,
+            "data": {"toolCallId": "tc1", "toolName": tool_name}
+        })
+    }
+
+    // ---- ask_user detection (unchanged) ----
+
+    #[test]
+    fn ask_user_tool_is_input_needed() {
+        let events = vec![
+            make_event("assistant.turn_start", &now_ts()),
+            make_tool_start("ask_user", &now_ts()),
+        ];
+        assert_eq!(classify_events(&events, true), SessionActivity::InputNeeded);
+    }
+
+    #[test]
+    fn ask_user_stale_no_process_is_idle() {
+        let events = vec![
+            make_event("assistant.turn_start", &past_ts(300)),
+            make_tool_start("ask_user", &past_ts(300)),
+        ];
+        assert_eq!(classify_events(&events, false), SessionActivity::Idle);
+    }
+
+    // ---- Tool confirmation heuristic ----
+
+    #[test]
+    fn active_turn_old_event_is_input_needed() {
+        // Simulates "Do you want to run this command?" — turn started >60s ago,
+        // last event is tool.execution_complete from previous step, process running.
+        let events = vec![
+            make_event("user.message", &past_ts(90)),
+            make_event("assistant.turn_start", &past_ts(85)),
+            make_event("assistant.message", &past_ts(80)),
+            make_tool_start("view", &past_ts(80)),
+            make_event("tool.execution_complete", &past_ts(75)),
+        ];
+        assert_eq!(classify_events(&events, true), SessionActivity::InputNeeded);
+    }
+
+    #[test]
+    fn active_turn_recent_event_is_in_progress() {
+        // Same as above but events are recent — model is still thinking
+        let events = vec![
+            make_event("user.message", &now_ts()),
+            make_event("assistant.turn_start", &now_ts()),
+            make_event("assistant.message", &now_ts()),
+            make_tool_start("view", &now_ts()),
+            make_event("tool.execution_complete", &now_ts()),
+        ];
+        assert_eq!(classify_events(&events, true), SessionActivity::InProgress);
+    }
+
+    #[test]
+    fn turn_start_old_is_input_needed() {
+        // turn_start >60s ago with no further events — likely a confirmation prompt
+        let events = vec![
+            make_event("user.message", &past_ts(90)),
+            make_event("assistant.turn_start", &past_ts(70)),
+        ];
+        assert_eq!(classify_events(&events, true), SessionActivity::InputNeeded);
+    }
+
+    #[test]
+    fn turn_start_recent_is_in_progress() {
+        // turn_start just happened — model is thinking
+        let events = vec![
+            make_event("user.message", &now_ts()),
+            make_event("assistant.turn_start", &now_ts()),
+        ];
+        assert_eq!(classify_events(&events, true), SessionActivity::InProgress);
+    }
+
+    #[test]
+    fn active_turn_tool_running_not_input_needed() {
+        // tool.execution_start is last event — tool is actively running, not confirmation.
+        // The confirmation heuristic skips tool.execution_start events.
+        let events = vec![
+            make_event("user.message", &past_ts(130)),
+            make_event("assistant.turn_start", &past_ts(120)),
+            make_tool_start("bash", &past_ts(90)),
+        ];
+        // Not stale (90 < 120), so InProgress. Caller maps to "closed" if process dead.
+        assert_eq!(classify_events(&events, true), SessionActivity::InProgress);
+    }
+
+    #[test]
+    fn turn_ended_is_idle() {
+        let events = vec![
+            make_event("assistant.turn_start", &now_ts()),
+            make_event("assistant.message", &now_ts()),
+            make_tool_start("bash", &now_ts()),
+            make_event("tool.execution_complete", &now_ts()),
+            make_event("assistant.turn_end", &now_ts()),
+        ];
+        assert_eq!(classify_events(&events, true), SessionActivity::Idle);
+    }
+
+    #[test]
+    fn no_process_active_turn_old_not_input_needed() {
+        // Same scenario as confirmation prompt but process not running →
+        // heuristic doesn't trigger (requires process_running).
+        // Event is recent (65s < 120s) so match returns InProgress.
+        // Caller maps to "closed" when process is not running.
+        let events = vec![
+            make_event("assistant.turn_start", &past_ts(70)),
+            make_event("tool.execution_complete", &past_ts(65)),
+        ];
+        assert_eq!(
+            classify_events(&events, false),
+            SessionActivity::InProgress
+        );
+    }
+
+    // ---- Workspace trust heuristic ----
+
+    #[test]
+    fn session_start_no_user_message_is_input_needed() {
+        // Process running, session.start >15s ago, no user.message → trust prompt
+        let events = vec![make_event("session.start", &past_ts(20))];
+        assert_eq!(classify_events(&events, true), SessionActivity::InputNeeded);
+    }
+
+    #[test]
+    fn session_start_no_user_message_recent_is_in_progress() {
+        // Process running, session.start <15s ago → still initializing
+        let events = vec![make_event("session.start", &now_ts())];
+        assert_eq!(classify_events(&events, true), SessionActivity::InProgress);
+    }
+
+    #[test]
+    fn session_start_with_user_message_is_in_progress() {
+        // Process running, user.message exists → not a trust prompt
+        let events = vec![
+            make_event("session.start", &past_ts(20)),
+            make_event("user.message", &now_ts()),
+        ];
+        assert_eq!(classify_events(&events, true), SessionActivity::InProgress);
+    }
+
+    #[test]
+    fn session_start_no_process_not_input_needed() {
+        // No process running → trust heuristic doesn't trigger.
+        // Event is recent (20s < 120s) so match returns InProgress.
+        // Caller maps to "closed" when process is not running.
+        let events = vec![make_event("session.start", &past_ts(20))];
+        assert_eq!(
+            classify_events(&events, false),
+            SessionActivity::InProgress
+        );
+    }
+
+    // ---- General tests ----
+
+    #[test]
+    fn task_complete_is_idle() {
+        let events = vec![
+            make_event("assistant.turn_start", &now_ts()),
+            make_tool_start("task_complete", &now_ts()),
+        ];
+        assert_eq!(classify_events(&events, true), SessionActivity::Idle);
+    }
+
+    // ---- Compaction / checkpoint events ----
+
+    #[test]
+    fn compaction_start_is_in_progress() {
+        let events = vec![
+            make_event("assistant.turn_start", &now_ts()),
+            make_event("session.compaction_start", &now_ts()),
+        ];
+        assert_eq!(
+            classify_events(&events, true),
+            SessionActivity::InProgress
+        );
+    }
+
+    #[test]
+    fn compaction_complete_is_in_progress() {
+        let events = vec![
+            make_event("assistant.turn_start", &now_ts()),
+            make_event("session.compaction_complete", &now_ts()),
+        ];
+        assert_eq!(
+            classify_events(&events, true),
+            SessionActivity::InProgress
+        );
+    }
+
+    #[test]
+    fn compaction_complete_stale_is_idle() {
+        let events = vec![
+            make_event("user.message", &past_ts(600)),
+            make_event("session.compaction_complete", &past_ts(300)),
+        ];
+        assert_eq!(classify_events(&events, true), SessionActivity::Idle);
     }
 }
