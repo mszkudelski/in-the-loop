@@ -77,18 +77,6 @@ export function Settings() {
   return (
     <form className="settings-form" onSubmit={handleSave}>
       <div className="settings-field">
-        <label htmlFor="slack-token">Slack User Token</label>
-        <input
-          id="slack-token"
-          type="password"
-          className="form-input"
-          placeholder="xoxp-..."
-          value={slackToken}
-          onChange={(e) => setSlackToken(e.target.value)}
-        />
-      </div>
-
-      <div className="settings-field">
         <label htmlFor="github-token">GitHub Token</label>
         <input
           id="github-token"

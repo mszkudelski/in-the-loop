@@ -31,7 +31,7 @@ export function AddItemForm({ onItemAdded }: AddItemFormProps) {
       <input
         type="text"
         className="form-input"
-        placeholder="Paste a URL to track (Slack, GitHub, OpenCode...)"
+        placeholder="Paste a URL to track (GitHub, OpenCode...)"
         value={url}
         onChange={(e) => setUrl(e.target.value)}
         required

@@ -1,6 +1,6 @@
 # In The Loop
 
-A **local-only desktop application** for macOS that helps you stay "in the loop" on various async work items. Monitor Slack threads, GitHub Actions, Pull Requests, Copilot Agent sessions, and CLI commands - all from your menu bar.
+A **local-only desktop application** for macOS that helps you stay "in the loop" on various async work items. Monitor GitHub Actions, Pull Requests, Copilot Agent sessions, and CLI commands - all from your menu bar.
 
 ![In The Loop Dashboard](docs/screenshot-placeholder.png)
 
@@ -23,7 +23,6 @@ macOS remembers this choice — subsequent launches work normally.
 - 📊 **Unified Dashboard** - Track all your async work items in one place
 - 🔄 **Auto-Polling** - Configurable background checks for updates
 - ✅ **Todo List** - Manage tasks and bind them to tracked items
-- 💬 **Slack Threads** - Monitor thread replies
 - ⚙️ **GitHub Actions** - Track workflow run status
 - 🔀 **Pull Requests** - Watch for reviews and status changes
 - 💻 **CLI Session Tracking** - Wrap commands to track completion
@@ -64,7 +63,6 @@ Once the app is running:
 1. Click the app icon in your menu bar
 2. Click "Show Settings"
 3. Enter your tokens:
-   - **Slack User Token** - Get from https://api.slack.com/authentication/token-types#user
    - **GitHub Personal Access Token** - Generate at https://github.com/settings/tokens with `repo` and `workflow` scopes
 
 ### 3. Install CLI Wrapper (Optional)
@@ -89,7 +87,6 @@ export PATH="$HOME/bin:$PATH"
 
 1. Open the app dashboard
 2. Paste a URL in the input field:
-   - Slack thread: `https://workspace.slack.com/archives/C12345/p1234567890`
    - GitHub Action: `https://github.com/owner/repo/actions/runs/12345`
    - Pull Request: `https://github.com/owner/repo/pull/42`
 3. Optionally add a custom title
@@ -168,7 +165,7 @@ in-the-loop/
 
 Items are stored in SQLite with:
 - `id` - Unique identifier
-- `type` - Item type (slack_thread, github_action, github_pr, etc.)
+- `type` - Item type (github_action, github_pr, etc.)
 - `status` - Current status (waiting, in_progress, updated, completed, failed)
 - `metadata` - JSON blob with type-specific data
 - `last_checked_at` - Last poll timestamp
@@ -216,7 +213,7 @@ npm test
 
 ### No updates showing
 - Verify API tokens are correctly configured
-- Check token permissions (Slack: user token, GitHub: repo + workflow scopes)
+- Check token permissions (GitHub: repo + workflow scopes)
 - Increase polling interval if hitting rate limits
 - Check item metadata is correctly parsed
 
