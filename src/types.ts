@@ -44,7 +44,6 @@ export interface Credentials {
 
 export interface Settings {
   polling_interval: number;
-  screen_width: number;
   notify_session_started: boolean;
   notify_session_ended: boolean;
   notify_input_needed: boolean;

@@ -8,7 +8,6 @@ export function Settings() {
   const [opencodeUrl, setOpencodeUrl] = useState('');
   const [opencodePassword, setOpencodePassword] = useState('');
   const [pollingInterval, setPollingInterval] = useState(30);
-  const [screenWidth, setScreenWidth] = useState(400);
   const [notifySessionStarted, setNotifySessionStarted] = useState(true);
   const [notifySessionEnded, setNotifySessionEnded] = useState(true);
   const [notifyInputNeeded, setNotifyInputNeeded] = useState(true);
@@ -25,7 +24,6 @@ export function Settings() {
     try {
       const settings: SettingsType = await invoke('get_settings');
       setPollingInterval(settings.polling_interval);
-      setScreenWidth(settings.screen_width);
       setNotifySessionStarted(settings.notify_session_started);
       setNotifySessionEnded(settings.notify_session_ended);
       setNotifyInputNeeded(settings.notify_input_needed);
@@ -53,7 +51,6 @@ export function Settings() {
       await invoke('save_settings', { 
         settings: {
           polling_interval: pollingInterval,
-          screen_width: screenWidth,
           notify_session_started: notifySessionStarted,
           notify_session_ended: notifySessionEnded,
           notify_input_needed: notifyInputNeeded,
@@ -76,18 +73,6 @@ export function Settings() {
 
   return (
     <form className="settings-form" onSubmit={handleSave}>
-      <div className="settings-field">
-        <label htmlFor="slack-token">Slack User Token</label>
-        <input
-          id="slack-token"
-          type="password"
-          className="form-input"
-          placeholder="xoxp-..."
-          value={slackToken}
-          onChange={(e) => setSlackToken(e.target.value)}
-        />
-      </div>
-
       <div className="settings-field">
         <label htmlFor="github-token">GitHub Token</label>
         <input
@@ -142,27 +127,6 @@ export function Settings() {
           <span>5s</span>
           <span>1min</span>
           <span>5min</span>
-        </div>
-      </div>
-
-      <div className="settings-field">
-        <label htmlFor="screen-width">
-          Screen Width: {screenWidth}px
-        </label>
-        <input
-          id="screen-width"
-          type="range"
-          min="300"
-          max="1200"
-          step="50"
-          value={screenWidth}
-          onChange={(e) => setScreenWidth(parseInt(e.target.value))}
-          style={{ width: '100%' }}
-        />
-        <div className="range-labels">
-          <span>300px</span>
-          <span>750px</span>
-          <span>1200px</span>
         </div>
       </div>
 
