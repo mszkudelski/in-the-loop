@@ -640,6 +640,8 @@ impl PollingManager {
         // If the copilot process is no longer running, the session is closed.
         // A closed session stays closed — process_running may be true because
         // a different session at the same CWD is active, not this one.
+        let last_activity = copilot_cli::last_event_timestamp(session_id);
+
         let new_status = if !process_running || item.status == "closed" {
             "closed"
         } else {
@@ -647,7 +649,17 @@ impl PollingManager {
                 copilot_cli::SessionActivity::InProgress => "in_progress",
                 copilot_cli::SessionActivity::InputNeeded => "input_needed",
                 copilot_cli::SessionActivity::Idle if item.status == "waiting" => "waiting",
-                copilot_cli::SessionActivity::Idle => "completed",
+                copilot_cli::SessionActivity::Idle => {
+                    // When process_running is true but the session has been idle
+                    // for over 5 minutes, the copilot process likely belongs to a
+                    // different session sharing the same CWD. Close this one.
+                    let is_stale = last_activity
+                        .as_deref()
+                        .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
+                        .map(|ts| chrono::Utc::now().signed_duration_since(ts) > chrono::Duration::minutes(5))
+                        .unwrap_or(true);
+                    if is_stale { "closed" } else { "completed" }
+                }
             }
         };
 
@@ -663,7 +675,6 @@ impl PollingManager {
         }
 
         // Update metadata
-        let last_activity = copilot_cli::last_event_timestamp(session_id);
         let new_metadata = serde_json::json!({
             "copilot_session_id": session.id,
             "cwd": session.cwd,
@@ -727,6 +738,8 @@ impl PollingManager {
                 let process_running = copilot_cli::is_session_process_running(&session, active_cwds);
                 let activity = copilot_cli::detect_session_activity(sid, process_running);
 
+                let last_activity_ts = copilot_cli::last_event_timestamp(sid);
+
                 let new_status = if !process_running || item.status == "closed" {
                     "closed"
                 } else {
@@ -734,7 +747,14 @@ impl PollingManager {
                         copilot_cli::SessionActivity::InProgress => "in_progress",
                         copilot_cli::SessionActivity::InputNeeded => "input_needed",
                         copilot_cli::SessionActivity::Idle if item.status == "waiting" => "waiting",
-                        copilot_cli::SessionActivity::Idle => "completed",
+                        copilot_cli::SessionActivity::Idle => {
+                            let is_stale = last_activity_ts
+                                .as_deref()
+                                .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
+                                .map(|ts| chrono::Utc::now().signed_duration_since(ts) > chrono::Duration::minutes(5))
+                                .unwrap_or(true);
+                            if is_stale { "closed" } else { "completed" }
+                        }
                     }
                 };
 
@@ -753,8 +773,7 @@ impl PollingManager {
                     map.insert("summary".to_string(), serde_json::json!(session.summary));
                     map.insert("repository".to_string(), serde_json::json!(session.repository));
                     map.insert("branch".to_string(), serde_json::json!(session.branch));
-                    let ts = copilot_cli::last_event_timestamp(sid);
-                    if let Some(ts) = ts {
+                    if let Some(ts) = &last_activity_ts {
                         map.insert("last_activity".to_string(), serde_json::json!(ts));
                     }
                 }
