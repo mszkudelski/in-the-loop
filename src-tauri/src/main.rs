@@ -29,7 +29,17 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .plugin(tauri_plugin_clipboard_manager::init());
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::SIZE
+                        | tauri_plugin_window_state::StateFlags::POSITION
+                        | tauri_plugin_window_state::StateFlags::MAXIMIZED
+                        | tauri_plugin_window_state::StateFlags::FULLSCREEN,
+                )
+                .build(),
+        );
 
     // Register the updater plugin on desktop only
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -95,22 +105,14 @@ fn main() {
                 }
             });
 
-            if let Ok(settings) = database.get_all_settings() {
-                if let Some(window) = app.get_webview_window("main") {
-                    if let Ok(current_size) = window.outer_size() {
-                        let new_size = tauri::PhysicalSize::new(
-                            settings.screen_width as u32,
-                            current_size.height,
-                        );
-                        let _ = window.set_size(new_size);
-                    }
-                }
-            }
-
             Ok(())
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
+                use tauri_plugin_window_state::AppHandleExt;
+                let _ = window.app_handle().save_window_state(
+                    tauri_plugin_window_state::StateFlags::all(),
+                );
                 window.hide().unwrap();
                 api.prevent_close();
             }

@@ -34,7 +34,6 @@ pub struct Credentials {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub polling_interval: i64,
-    pub screen_width: i64,
     pub notify_session_started: bool,
     pub notify_session_ended: bool,
     pub notify_input_needed: bool,
@@ -614,12 +613,6 @@ impl Database {
             .parse()
             .unwrap_or(30);
 
-        let screen_width = self
-            .get_setting("screen_width")?
-            .unwrap_or_else(|| "400".to_string())
-            .parse()
-            .unwrap_or(400);
-
         let notify_session_started = self
             .get_setting("notify_session_started")?
             .map(|v| v != "false")
@@ -637,7 +630,6 @@ impl Database {
 
         Ok(Settings {
             polling_interval,
-            screen_width,
             notify_session_started,
             notify_session_ended,
             notify_input_needed,
