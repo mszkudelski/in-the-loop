@@ -25,6 +25,18 @@ export function Dashboard() {
     };
   }, [showArchived]);
 
+  useEffect(() => {
+    if (!showSettings) return;
+
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowSettings(false);
+    };
+    document.addEventListener('keydown', handleEsc);
+    return () => {
+      document.removeEventListener('keydown', handleEsc);
+    };
+  }, [showSettings]);
+
   const loadItems = async () => {
     try {
       const loadedItems: Item[] = await invoke('get_items', { archived: showArchived });
