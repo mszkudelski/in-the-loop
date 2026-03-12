@@ -1060,3 +1060,52 @@ button:focus-visible {
   width: 40%;
   animation: indeterminate 1.2s ease-in-out infinite;
 }
+
+/* --- Tooltip --- */
+
+.tooltip-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.tooltip-trigger {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  font-size: 0.75em;
+  line-height: 1;
+}
+
+.tooltip-trigger:hover {
+  color: #fff;
+}
+
+.tooltip-content {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  background: #2a2a2a;
+  color: #ccc;
+  border: 1px solid #3c3c3c;
+  border-radius: 5px;
+  padding: 6px 8px;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  white-space: pre-line;
+  width: max-content;
+  max-width: 260px;
+  z-index: 100;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.4);
+  opacity: 1;
+}
+
+.tooltip-wrapper:hover .tooltip-content {
+  display: block;
+}

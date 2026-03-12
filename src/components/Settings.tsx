@@ -106,8 +106,17 @@ export function Settings() {
           </span>
         )}
         {githubTokenSource === 'none' && (
-          <span style={{ fontSize: '0.8em', color: '#888' }}>
+          <span style={{ fontSize: '0.8em', color: '#888', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
             No token configured
+            <span className="tooltip-wrapper">
+              <span className="tooltip-trigger">?</span>
+              <span className="tooltip-content">
+                Three ways to authenticate:{'\n'}
+                1. Set GH_TOKEN or GITHUB_TOKEN env var{'\n'}
+                2. Paste a token above (generate at github.com/settings/tokens){'\n'}
+                3. Run `gh auth login` in your terminal
+              </span>
+            </span>
           </span>
         )}
       </div>
