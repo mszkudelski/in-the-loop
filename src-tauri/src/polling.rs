@@ -1,5 +1,5 @@
 use crate::db::{Database, Item};
-use crate::services::{copilot_cli, github_actions, github_pr, opencode, slack, url_parser};
+use crate::services::{copilot_cli, github_actions, github_pr, github_repo, opencode, slack, url_parser};
 use crate::tray;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -102,6 +102,7 @@ impl PollingManager {
                 && item.item_type != "copilot_agent"
                 && item.item_type != "cli_session"
                 && item.item_type != "github_pr"
+                && item.item_type != "github_repo"
             {
                 continue;
             }
@@ -110,11 +111,15 @@ impl PollingManager {
             {
                 continue;
             }
+            if item.item_type == "github_repo" && item.status == "archived" {
+                continue;
+            }
 
             let result = match item.item_type.as_str() {
                 "slack_thread" => Self::poll_slack_thread(db, &item).await,
                 "github_action" => Self::poll_github_action(db, &item).await,
                 "github_pr" => Self::poll_github_pr(db, &item).await,
+                "github_repo" => Self::poll_github_repo(db, &item).await,
                 "opencode_session" => {
                     Self::poll_opencode_session(db, &item, &opencode_statuses, app_handle).await
                 }
@@ -284,6 +289,73 @@ impl PollingManager {
         } else {
             db.update_item_status(&item.id, &item.status, None)?;
         }
+
+        Ok(())
+    }
+
+    async fn poll_github_repo(db: &Arc<Database>, item: &crate::db::Item) -> anyhow::Result<()> {
+        let token = Self::resolve_github_token(db);
+
+        let metadata: serde_json::Value = serde_json::from_str(&item.metadata)?;
+        let owner = Self::resolve_metadata_field(item, &metadata, "owner")?;
+        let repo = Self::resolve_metadata_field(item, &metadata, "repo")?;
+
+        let result = github_repo::check_github_repo_prs(&token, &owner, &repo).await?;
+
+        let new_count = result
+            .get("open_pr_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+
+        let old_count = metadata
+            .get("open_pr_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+
+        let old_pr_numbers: Vec<u64> = metadata
+            .get("open_prs")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|p| p.get("number").and_then(|n| n.as_u64()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let new_pr_numbers: Vec<u64> = result
+            .get("open_prs")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|p| p.get("number").and_then(|n| n.as_u64()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let has_new_prs = new_pr_numbers.iter().any(|n| !old_pr_numbers.contains(n));
+        let has_closed_prs = old_pr_numbers.iter().any(|n| !new_pr_numbers.contains(n));
+
+        let status = if new_count == 0 {
+            "waiting"
+        } else if has_new_prs || has_closed_prs {
+            "updated"
+        } else if new_count != old_count {
+            "updated"
+        } else if item.status == "waiting" {
+            "in_progress"
+        } else {
+            &item.status
+        };
+
+        let mut merged = result.clone();
+        merged.insert("owner".to_string(), serde_json::json!(owner));
+        merged.insert("repo".to_string(), serde_json::json!(repo));
+
+        db.update_item_status(
+            &item.id,
+            status,
+            Some(&serde_json::to_string(&merged)?),
+        )?;
 
         Ok(())
     }

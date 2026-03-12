@@ -54,6 +54,7 @@ export function ItemCard({ item, isArchived, onArchive, onUnarchive }: ItemCardP
     slack_thread: 'Slack',
     github_action: 'Action',
     github_pr: 'PR',
+    github_repo: 'Repo',
     copilot_agent: 'Copilot',
     cli_session: 'CLI',
     opencode_session: 'OpenCode',
@@ -89,6 +90,10 @@ export function ItemCard({ item, isArchived, onArchive, onUnarchive }: ItemCardP
   const lastActivityStr = timeAgo(lastActivity);
   const hasLink = !!(getOpenCodeSessionUrl(item) || item.url);
 
+  const repoDetail = item.type === 'github_repo' && item.metadata?.open_pr_count != null
+    ? `${item.metadata.open_pr_count} open PR${item.metadata.open_pr_count === 1 ? '' : 's'}`
+    : null;
+
   return (
     <>
       <div className="item-row" onContextMenu={handleContextMenu}>
@@ -100,6 +105,9 @@ export function ItemCard({ item, isArchived, onArchive, onUnarchive }: ItemCardP
           </span>
         ) : (
           <span className="item-title">{item.title}</span>
+        )}
+        {repoDetail && (
+          <span className="item-detail">{repoDetail}</span>
         )}
         {lastActivityStr && (
           <span className="item-time">{lastActivityStr}</span>

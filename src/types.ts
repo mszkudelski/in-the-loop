@@ -2,6 +2,7 @@ export type ItemType =
   | 'slack_thread' 
   | 'github_action' 
   | 'github_pr' 
+  | 'github_repo'
   | 'copilot_agent' 
   | 'cli_session'
   | 'opencode_session';

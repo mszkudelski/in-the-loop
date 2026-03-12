@@ -244,6 +244,13 @@ button:focus-visible {
   flex-shrink: 0;
 }
 
+.item-detail {
+  font-size: 0.8rem;
+  color: #888;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 /* --- Badges --- */
 
 .type-badge {

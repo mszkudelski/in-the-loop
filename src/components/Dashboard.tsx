@@ -98,6 +98,7 @@ export function Dashboard() {
     slack_thread: items.filter(i => i.type === 'slack_thread').length,
     github_action: items.filter(i => i.type === 'github_action').length,
     github_pr: items.filter(i => i.type === 'github_pr').length,
+    github_repo: items.filter(i => i.type === 'github_repo').length,
     copilot_agent: items.filter(i => i.type === 'copilot_agent').length,
     cli_session: items.filter(i => i.type === 'cli_session').length,
     opencode_session: items.filter(i => i.type === 'opencode_session').length,
@@ -145,6 +146,14 @@ export function Dashboard() {
             className={`filter-chip ${filter === 'github_pr' ? 'active' : ''}`}
           >
             PRs ({typeCounts.github_pr})
+          </button>
+        )}
+        {typeCounts.github_repo > 0 && (
+          <button 
+            onClick={() => setFilter('github_repo')}
+            className={`filter-chip ${filter === 'github_repo' ? 'active' : ''}`}
+          >
+            Repos ({typeCounts.github_repo})
           </button>
         )}
         {typeCounts.copilot_agent > 0 && (

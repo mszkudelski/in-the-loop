@@ -29,6 +29,7 @@ fn type_label(item_type: &str) -> &'static str {
         "slack_thread" => "Slack",
         "github_action" => "Action",
         "github_pr" => "PR",
+        "github_repo" => "Repo",
         "copilot_agent" => "Copilot",
         "cli_session" => "CLI",
         "opencode_session" => "OpenCode",
@@ -168,12 +169,7 @@ pub fn refresh_tray(app_handle: &AppHandle, db: &Arc<Database>) {
         .filter(|i| {
             matches!(
                 i.status.as_str(),
-                "completed"
-                    | "failed"
-                    | "updated"
-                    | "approved"
-                    | "merged"
-                    | "input_needed"
+                "completed" | "failed" | "updated" | "approved" | "merged" | "input_needed"
             )
         })
         .count();
