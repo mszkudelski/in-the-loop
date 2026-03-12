@@ -143,6 +143,7 @@ fn main() {
             commands::get_todo_ids_for_item,
             commands::get_add_item_shortcut,
             commands::update_add_item_shortcut,
+            commands::get_github_token_source,
             in_the_loop_lib::updater::fetch_update,
             in_the_loop_lib::updater::install_update,
         ])
