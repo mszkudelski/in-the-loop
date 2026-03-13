@@ -11,6 +11,7 @@ export function Settings() {
   const [notifySessionStarted, setNotifySessionStarted] = useState(true);
   const [notifySessionEnded, setNotifySessionEnded] = useState(true);
   const [notifyInputNeeded, setNotifyInputNeeded] = useState(true);
+  const [githubUsername, setGithubUsername] = useState('');
   const [addItemShortcut, setAddItemShortcut] = useState('Ctrl+Shift+Q');
   const [recordingShortcut, setRecordingShortcut] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -27,6 +28,7 @@ export function Settings() {
       setNotifySessionStarted(settings.notify_session_started);
       setNotifySessionEnded(settings.notify_session_ended);
       setNotifyInputNeeded(settings.notify_input_needed);
+      setGithubUsername(settings.github_username || '');
 
       const shortcut: string = await invoke('get_add_item_shortcut');
       setAddItemShortcut(shortcut);
@@ -54,6 +56,7 @@ export function Settings() {
           notify_session_started: notifySessionStarted,
           notify_session_ended: notifySessionEnded,
           notify_input_needed: notifyInputNeeded,
+          github_username: githubUsername,
         } 
       });
 
@@ -82,6 +85,18 @@ export function Settings() {
           placeholder="ghp_..."
           value={githubToken}
           onChange={(e) => setGithubToken(e.target.value)}
+        />
+      </div>
+
+      <div className="settings-field">
+        <label htmlFor="github-username">GitHub Username</label>
+        <input
+          id="github-username"
+          type="text"
+          className="form-input"
+          placeholder="Your GitHub login (for filtering PRs)"
+          value={githubUsername}
+          onChange={(e) => setGithubUsername(e.target.value)}
         />
       </div>
 

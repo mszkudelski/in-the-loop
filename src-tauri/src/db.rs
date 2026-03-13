@@ -37,6 +37,7 @@ pub struct Settings {
     pub notify_session_started: bool,
     pub notify_session_ended: bool,
     pub notify_input_needed: bool,
+    pub github_username: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,12 +97,11 @@ impl Database {
         }
 
         // Migration: add archived_at column if missing
-        let has_archived_at = conn.prepare("SELECT archived_at FROM items LIMIT 0").is_ok();
+        let has_archived_at = conn
+            .prepare("SELECT archived_at FROM items LIMIT 0")
+            .is_ok();
         if !has_archived_at {
-            conn.execute(
-                "ALTER TABLE items ADD COLUMN archived_at TEXT",
-                [],
-            )?;
+            conn.execute("ALTER TABLE items ADD COLUMN archived_at TEXT", [])?;
         }
 
         conn.execute(
@@ -158,7 +158,9 @@ impl Database {
         )?;
 
         // Migration: add planned_date column if missing
-        let has_planned_date = conn.prepare("SELECT planned_date FROM todos LIMIT 0").is_ok();
+        let has_planned_date = conn
+            .prepare("SELECT planned_date FROM todos LIMIT 0")
+            .is_ok();
         if !has_planned_date {
             conn.execute("ALTER TABLE todos ADD COLUMN planned_date TEXT", [])?;
         }
@@ -465,12 +467,14 @@ impl Database {
 
     /// Remove any copilot_agent items that track the given copilot session id.
     /// Used when a cli_session claims the same session to avoid duplicates.
-    pub fn remove_copilot_agent_by_session_id(&self, copilot_session_id: &str) -> Result<Vec<String>> {
+    pub fn remove_copilot_agent_by_session_id(
+        &self,
+        copilot_session_id: &str,
+    ) -> Result<Vec<String>> {
         let conn = self.conn.lock().unwrap();
         // Find matching copilot_agent item ids
-        let mut stmt = conn.prepare(
-            "SELECT id, metadata FROM items WHERE type = 'copilot_agent'",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT id, metadata FROM items WHERE type = 'copilot_agent'")?;
         let ids_to_remove: Vec<String> = stmt
             .query_map([], |row| {
                 let id: String = row.get(0)?;
@@ -500,9 +504,8 @@ impl Database {
 
     pub fn get_copilot_session_ids(&self) -> Result<Vec<String>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT metadata FROM items WHERE type IN ('copilot_agent', 'cli_session')",
-        )?;
+        let mut stmt = conn
+            .prepare("SELECT metadata FROM items WHERE type IN ('copilot_agent', 'cli_session')")?;
         let ids = stmt
             .query_map([], |row| {
                 let meta: String = row.get(0)?;
@@ -628,11 +631,14 @@ impl Database {
             .map(|v| v != "false")
             .unwrap_or(true);
 
+        let github_username = self.get_setting("github_username")?.unwrap_or_default();
+
         Ok(Settings {
             polling_interval,
             notify_session_started,
             notify_session_ended,
             notify_input_needed,
+            github_username,
         })
     }
 
@@ -690,7 +696,10 @@ impl Database {
         Ok(result)
     }
 
-    fn get_bound_items_for_todo(conn: &Connection, todo_id: &str) -> Result<Vec<Item>, rusqlite::Error> {
+    fn get_bound_items_for_todo(
+        conn: &Connection,
+        todo_id: &str,
+    ) -> Result<Vec<Item>, rusqlite::Error> {
         let mut binding_stmt = conn.prepare(
             "SELECT i.id, i.type, i.title, i.url, i.status, i.previous_status, i.metadata,
                     i.last_checked_at, i.last_updated_at, i.created_at, i.archived,
@@ -722,7 +731,10 @@ impl Database {
         Ok(items)
     }
 
-    fn get_subtasks(conn: &Connection, parent_id: &str) -> Result<Vec<TodoWithBindings>, rusqlite::Error> {
+    fn get_subtasks(
+        conn: &Connection,
+        parent_id: &str,
+    ) -> Result<Vec<TodoWithBindings>, rusqlite::Error> {
         let mut stmt = conn.prepare(
             "SELECT id, title, status, created_at, completed_at, planned_date, parent_id
              FROM todos WHERE parent_id = ?1 ORDER BY status ASC, created_at ASC",
@@ -775,7 +787,10 @@ impl Database {
             params![id],
         )?;
         conn.execute("DELETE FROM todos WHERE parent_id = ?1", params![id])?;
-        conn.execute("DELETE FROM todo_item_bindings WHERE todo_id = ?1", params![id])?;
+        conn.execute(
+            "DELETE FROM todo_item_bindings WHERE todo_id = ?1",
+            params![id],
+        )?;
         conn.execute("DELETE FROM todos WHERE id = ?1", params![id])?;
         Ok(())
     }
@@ -809,9 +824,7 @@ impl Database {
 
     pub fn get_todo_ids_for_item(&self, item_id: &str) -> Result<Vec<String>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT todo_id FROM todo_item_bindings WHERE item_id = ?1",
-        )?;
+        let mut stmt = conn.prepare("SELECT todo_id FROM todo_item_bindings WHERE item_id = ?1")?;
         let ids = stmt
             .query_map([item_id], |row| row.get(0))?
             .collect::<Result<Vec<String>, _>>()?;
