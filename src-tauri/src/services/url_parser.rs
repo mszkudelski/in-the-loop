@@ -74,7 +74,10 @@ pub fn parse_url(url: &str) -> Result<ParsedUrl> {
     }
 
     // GitHub repository — must be AFTER action/PR patterns (more specific first)
-    let github_repo_re = Regex::new(r"https?://github\.com/([^/]+)/([^/]+)/?$")?;
+    // Also matches URLs with trailing sub-paths like /pulls, /issues, /wiki, etc.
+    let github_repo_re = Regex::new(
+        r"https?://github\.com/([^/]+)/([^/]+?)(?:/(?:pulls|issues|wiki|projects|actions|security|pulse|graphs|network|settings))?/?$",
+    )?;
     if let Some(caps) = github_repo_re.captures(url) {
         let owner = caps[1].to_string();
         let repo = caps[2].to_string();
@@ -152,5 +155,24 @@ mod tests {
         let url = "https://github.com/owner/repo/pull/42";
         let result = parse_url(url).unwrap();
         assert_eq!(result.item_type, "github_pr");
+    }
+
+    #[test]
+    fn test_parse_github_repo_url_with_pulls_suffix() {
+        let url = "https://github.com/facebook/react/pulls";
+        let result = parse_url(url).unwrap();
+        assert_eq!(result.item_type, "github_repo");
+        assert_eq!(result.metadata.get("owner").unwrap(), "facebook");
+        assert_eq!(result.metadata.get("repo").unwrap(), "react");
+        assert_eq!(result.suggested_title, "facebook/react");
+    }
+
+    #[test]
+    fn test_parse_github_repo_url_with_issues_suffix() {
+        let url = "https://github.com/facebook/react/issues";
+        let result = parse_url(url).unwrap();
+        assert_eq!(result.item_type, "github_repo");
+        assert_eq!(result.metadata.get("owner").unwrap(), "facebook");
+        assert_eq!(result.metadata.get("repo").unwrap(), "react");
     }
 }
