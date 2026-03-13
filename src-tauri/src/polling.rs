@@ -180,13 +180,28 @@ impl PollingManager {
         Ok(())
     }
 
+    fn resolve_github_token(db: &Database) -> String {
+        if let Ok(token) = std::env::var("GH_TOKEN") {
+            if !token.trim().is_empty() {
+                return token;
+            }
+        }
+        if let Ok(token) = std::env::var("GITHUB_TOKEN") {
+            if !token.trim().is_empty() {
+                return token;
+            }
+        }
+        db.get_credential("github_token")
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    }
+
     async fn poll_github_action(
         db: &Arc<Database>,
         item: &crate::db::Item,
     ) -> anyhow::Result<()> {
-        let token = db
-            .get_credential("github_token")?
-            .unwrap_or_default();
+        let token = Self::resolve_github_token(db);
 
         let metadata: serde_json::Value = serde_json::from_str(&item.metadata)?;
         let owner = Self::resolve_metadata_field(item, &metadata, "owner")?;
@@ -232,9 +247,7 @@ impl PollingManager {
     }
 
     async fn poll_github_pr(db: &Arc<Database>, item: &crate::db::Item) -> anyhow::Result<()> {
-        let token = db
-            .get_credential("github_token")?
-            .unwrap_or_default();
+        let token = Self::resolve_github_token(db);
 
         let metadata: serde_json::Value = serde_json::from_str(&item.metadata)?;
         let owner = Self::resolve_metadata_field(item, &metadata, "owner")?;

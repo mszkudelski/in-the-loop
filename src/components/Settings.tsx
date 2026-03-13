@@ -15,6 +15,7 @@ export function Settings() {
   const [recordingShortcut, setRecordingShortcut] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [githubTokenSource, setGithubTokenSource] = useState('');
 
   useEffect(() => {
     loadSettings();
@@ -30,6 +31,9 @@ export function Settings() {
 
       const shortcut: string = await invoke('get_add_item_shortcut');
       setAddItemShortcut(shortcut);
+
+      const tokenSource: string = await invoke('get_github_token_source');
+      setGithubTokenSource(tokenSource);
     } catch (error) {
       console.error('Failed to load settings:', error);
     }
@@ -64,6 +68,9 @@ export function Settings() {
       setGithubToken('');
       setOpencodeUrl('');
       setOpencodePassword('');
+
+      const tokenSource: string = await invoke('get_github_token_source');
+      setGithubTokenSource(tokenSource);
     } catch (error) {
       setMessage(`Error: ${error}`);
     } finally {
@@ -79,10 +86,39 @@ export function Settings() {
           id="github-token"
           type="password"
           className="form-input"
-          placeholder="ghp_..."
+          placeholder="github_pat_... or ghp_..."
           value={githubToken}
           onChange={(e) => setGithubToken(e.target.value)}
         />
+        {githubTokenSource === 'GH_TOKEN' && (
+          <span style={{ fontSize: '0.8em', opacity: 0.7, color: '#4caf50' }}>
+            Using token from GH_TOKEN env var
+          </span>
+        )}
+        {githubTokenSource === 'GITHUB_TOKEN' && (
+          <span style={{ fontSize: '0.8em', opacity: 0.7, color: '#4caf50' }}>
+            Using token from GITHUB_TOKEN env var
+          </span>
+        )}
+        {githubTokenSource === 'settings' && (
+          <span style={{ fontSize: '0.8em', opacity: 0.7, color: '#4caf50' }}>
+            Using token from Settings
+          </span>
+        )}
+        {githubTokenSource === 'none' && (
+          <span style={{ fontSize: '0.8em', color: '#888', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+            No token configured
+            <span className="tooltip-wrapper">
+              <span className="tooltip-trigger">?</span>
+              <span className="tooltip-content">
+                Three ways to authenticate:{'\n'}
+                1. Set GH_TOKEN or GITHUB_TOKEN env var{'\n'}
+                2. Paste a token above (generate at github.com/settings/tokens){'\n'}
+                3. Run `gh auth login` in your terminal
+              </span>
+            </span>
+          </span>
+        )}
       </div>
 
       <div className="settings-field">

@@ -317,3 +317,23 @@ pub async fn update_add_item_shortcut(
 ) -> Result<(), String> {
     shortcut::update_shortcut(&app, &shortcut_str)
 }
+
+#[tauri::command]
+pub async fn get_github_token_source(state: State<'_, AppState>) -> Result<String, String> {
+    if let Ok(token) = std::env::var("GH_TOKEN") {
+        if !token.trim().is_empty() {
+            return Ok("GH_TOKEN".to_string());
+        }
+    }
+    if let Ok(token) = std::env::var("GITHUB_TOKEN") {
+        if !token.trim().is_empty() {
+            return Ok("GITHUB_TOKEN".to_string());
+        }
+    }
+    if let Ok(Some(token)) = state.db.get_credential("github_token") {
+        if !token.trim().is_empty() {
+            return Ok("settings".to_string());
+        }
+    }
+    Ok("none".to_string())
+}
