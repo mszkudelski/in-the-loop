@@ -294,7 +294,9 @@ impl PollingManager {
     }
 
     async fn poll_github_repo(db: &Arc<Database>, item: &crate::db::Item) -> anyhow::Result<()> {
-        let token = Self::resolve_github_token(db);
+        let token = db
+            .get_credential("github_token")?
+            .unwrap_or_default();
 
         let metadata: serde_json::Value = serde_json::from_str(&item.metadata)?;
         let owner = Self::resolve_metadata_field(item, &metadata, "owner")?;
