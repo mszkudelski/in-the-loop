@@ -251,6 +251,98 @@ button:focus-visible {
   flex-shrink: 0;
 }
 
+/* --- Repo PR Panel --- */
+
+.btn-expand {
+  font-size: 0.7rem;
+  opacity: 0.6;
+  padding: 0 0.3rem;
+}
+
+.btn-expand:hover {
+  opacity: 1;
+}
+
+.repo-pr-panel {
+  background: #111;
+  border-left: 2px solid #333;
+  margin-left: 1rem;
+  padding: 0.3rem 0;
+}
+
+.repo-pr-section-header {
+  font-size: 0.75rem;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.2rem 0.8rem;
+  margin-top: 0.2rem;
+}
+
+.repo-pr-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.8rem;
+  font-size: 0.85rem;
+}
+
+.repo-pr-row:hover {
+  background: #1a1a1a;
+}
+
+.repo-pr-mine {
+  border-left: 2px solid #4f46e5;
+  margin-left: -2px;
+}
+
+.repo-pr-number {
+  color: #93b4f5;
+  cursor: pointer;
+  flex-shrink: 0;
+  min-width: 3rem;
+}
+
+.repo-pr-number:hover {
+  text-decoration: underline;
+}
+
+.repo-pr-title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #ccc;
+  cursor: pointer;
+}
+
+.repo-pr-title:hover {
+  color: #93b4f5;
+}
+
+.repo-pr-author {
+  font-size: 0.75rem;
+  color: #666;
+  flex-shrink: 0;
+}
+
+.repo-pr-draft {
+  font-size: 0.7rem;
+  color: #b8860b;
+  background: #2a2000;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.repo-pr-time {
+  font-size: 0.75rem;
+  color: #555;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 /* --- Badges --- */
 
 .type-badge {
