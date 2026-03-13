@@ -171,6 +171,11 @@ pub async fn save_settings(
         .save_setting("notify_input_needed", &settings.notify_input_needed.to_string())
         .map_err(|e| e.to_string())?;
 
+    state
+        .db
+        .save_setting("github_username", &settings.github_username)
+        .map_err(|e| e.to_string())?;
+
     Ok(())
 }
 

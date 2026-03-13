@@ -48,6 +48,7 @@ export interface Settings {
   notify_session_started: boolean;
   notify_session_ended: boolean;
   notify_input_needed: boolean;
+  github_username: string;
 }
 
 export interface AddItemRequest {
