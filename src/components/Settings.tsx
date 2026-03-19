@@ -11,6 +11,8 @@ export function Settings() {
   const [notifySessionStarted, setNotifySessionStarted] = useState(true);
   const [notifySessionEnded, setNotifySessionEnded] = useState(true);
   const [notifyInputNeeded, setNotifyInputNeeded] = useState(true);
+  const [githubUsername, setGithubUsername] = useState('');
+  const [githubRepoEnabled, setGithubRepoEnabled] = useState(false);
   const [addItemShortcut, setAddItemShortcut] = useState('Ctrl+Shift+Q');
   const [recordingShortcut, setRecordingShortcut] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -27,6 +29,8 @@ export function Settings() {
       setNotifySessionStarted(settings.notify_session_started);
       setNotifySessionEnded(settings.notify_session_ended);
       setNotifyInputNeeded(settings.notify_input_needed);
+      setGithubUsername(settings.github_username || '');
+      setGithubRepoEnabled(settings.github_repo_enabled ?? false);
 
       const shortcut: string = await invoke('get_add_item_shortcut');
       setAddItemShortcut(shortcut);
@@ -54,6 +58,8 @@ export function Settings() {
           notify_session_started: notifySessionStarted,
           notify_session_ended: notifySessionEnded,
           notify_input_needed: notifyInputNeeded,
+          github_username: githubUsername,
+          github_repo_enabled: githubRepoEnabled,
         } 
       });
 
@@ -84,6 +90,32 @@ export function Settings() {
           onChange={(e) => setGithubToken(e.target.value)}
         />
       </div>
+
+      <div className="settings-field">
+        <label>GitHub</label>
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={githubRepoEnabled}
+            onChange={(e) => setGithubRepoEnabled(e.target.checked)}
+          />
+          Track GitHub repositories
+        </label>
+      </div>
+
+      {githubRepoEnabled && (
+        <div className="settings-field">
+          <label htmlFor="github-username">GitHub Username</label>
+          <input
+            id="github-username"
+            type="text"
+            className="form-input"
+            placeholder="Your GitHub login (for filtering PRs)"
+            value={githubUsername}
+            onChange={(e) => setGithubUsername(e.target.value)}
+          />
+        </div>
+      )}
 
       <div className="settings-field">
         <label htmlFor="opencode-url">OpenCode URL</label>

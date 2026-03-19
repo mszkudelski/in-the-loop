@@ -20,6 +20,21 @@ pub async fn add_item(
 ) -> Result<(), String> {
     let parsed = url_parser::parse_url(&url).map_err(|e| e.to_string())?;
 
+    if parsed.item_type == "github_repo" {
+        let enabled = state
+            .db
+            .get_setting("github_repo_enabled")
+            .ok()
+            .flatten()
+            .map(|v| v == "true")
+            .unwrap_or(false);
+        if !enabled {
+            return Err(
+                "GitHub repo tracking is disabled. Enable it in Settings.".to_string(),
+            );
+        }
+    }
+
     let item = Item {
         id: Uuid::new_v4().to_string(),
         item_type: parsed.item_type,
@@ -169,6 +184,19 @@ pub async fn save_settings(
     state
         .db
         .save_setting("notify_input_needed", &settings.notify_input_needed.to_string())
+        .map_err(|e| e.to_string())?;
+
+    state
+        .db
+        .save_setting("github_username", &settings.github_username)
+        .map_err(|e| e.to_string())?;
+
+    state
+        .db
+        .save_setting(
+            "github_repo_enabled",
+            &settings.github_repo_enabled.to_string(),
+        )
         .map_err(|e| e.to_string())?;
 
     Ok(())

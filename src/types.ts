@@ -2,6 +2,7 @@ export type ItemType =
   | 'slack_thread' 
   | 'github_action' 
   | 'github_pr' 
+  | 'github_repo'
   | 'copilot_agent' 
   | 'cli_session'
   | 'opencode_session';
@@ -47,6 +48,8 @@ export interface Settings {
   notify_session_started: boolean;
   notify_session_ended: boolean;
   notify_input_needed: boolean;
+  github_username: string;
+  github_repo_enabled: boolean;
 }
 
 export interface AddItemRequest {

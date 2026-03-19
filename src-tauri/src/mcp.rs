@@ -121,7 +121,7 @@ impl McpHandler {
                     },
                     {
                         "name": "add_item",
-                        "description": "Add a new work item to track in In The Loop. Supports Slack thread URLs, GitHub PR URLs, and GitHub Actions run URLs.",
+                        "description": "Add a new work item to track in In The Loop. Supports Slack thread URLs, GitHub PR URLs, GitHub Actions run URLs, and GitHub repository URLs.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
@@ -475,10 +475,7 @@ fn format_todo_entry(out: &mut String, tw: &TodoWithBindings, indent: usize) {
     }
 
     for item in &tw.bound_items {
-        out.push_str(&format!(
-            "{}  ↳ {} [{}]\n",
-            prefix, item.title, item.status
-        ));
+        out.push_str(&format!("{}  ↳ {} [{}]\n", prefix, item.title, item.status));
     }
 
     for sub in &tw.subtasks {

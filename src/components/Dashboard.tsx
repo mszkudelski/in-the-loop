@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Item } from '../types';
+import { Item, Settings as SettingsType } from '../types';
 import { ItemCard } from './ItemCard';
 import { AddItemForm } from './AddItemForm';
 import { Settings } from './Settings';
@@ -12,9 +12,12 @@ export function Dashboard() {
   const [showSettings, setShowSettings] = useState(false);
   const [filter, setFilter] = useState<Item['type'] | 'all'>('all');
   const [showArchived, setShowArchived] = useState(false);
+  const [githubUsername, setGithubUsername] = useState('');
+  const [githubRepoEnabled, setGithubRepoEnabled] = useState(false);
 
   useEffect(() => {
     loadItems();
+    loadGithubUsername();
 
     const unlisten = listen('item-updated', () => {
       loadItems();
@@ -47,6 +50,16 @@ export function Dashboard() {
       setItems(parsedItems);
     } catch (error) {
       console.error('Failed to load items:', error);
+    }
+  };
+
+  const loadGithubUsername = async () => {
+    try {
+      const settings: SettingsType = await invoke('get_settings');
+      setGithubUsername(settings.github_username || '');
+      setGithubRepoEnabled(settings.github_repo_enabled ?? false);
+    } catch (error) {
+      console.error('Failed to load github settings:', error);
     }
   };
 
@@ -89,18 +102,23 @@ export function Dashboard() {
     }
   };
 
+  const visibleItems = githubRepoEnabled
+    ? items
+    : items.filter(i => i.type !== 'github_repo');
+
   const filteredItems = filter === 'all' 
-    ? items 
-    : items.filter(item => item.type === filter);
+    ? visibleItems 
+    : visibleItems.filter(item => item.type === filter);
 
   const typeCounts = {
-    all: items.length,
-    slack_thread: items.filter(i => i.type === 'slack_thread').length,
-    github_action: items.filter(i => i.type === 'github_action').length,
-    github_pr: items.filter(i => i.type === 'github_pr').length,
-    copilot_agent: items.filter(i => i.type === 'copilot_agent').length,
-    cli_session: items.filter(i => i.type === 'cli_session').length,
-    opencode_session: items.filter(i => i.type === 'opencode_session').length,
+    all: visibleItems.length,
+    slack_thread: visibleItems.filter(i => i.type === 'slack_thread').length,
+    github_action: visibleItems.filter(i => i.type === 'github_action').length,
+    github_pr: visibleItems.filter(i => i.type === 'github_pr').length,
+    github_repo: visibleItems.filter(i => i.type === 'github_repo').length,
+    copilot_agent: visibleItems.filter(i => i.type === 'copilot_agent').length,
+    cli_session: visibleItems.filter(i => i.type === 'cli_session').length,
+    opencode_session: visibleItems.filter(i => i.type === 'opencode_session').length,
   };
 
   return (
@@ -145,6 +163,14 @@ export function Dashboard() {
             className={`filter-chip ${filter === 'github_pr' ? 'active' : ''}`}
           >
             PRs ({typeCounts.github_pr})
+          </button>
+        )}
+        {typeCounts.github_repo > 0 && (
+          <button 
+            onClick={() => setFilter('github_repo')}
+            className={`filter-chip ${filter === 'github_repo' ? 'active' : ''}`}
+          >
+            Repos ({typeCounts.github_repo})
           </button>
         )}
         {typeCounts.copilot_agent > 0 && (
@@ -206,17 +232,18 @@ export function Dashboard() {
               isArchived={showArchived}
               onArchive={handleArchive}
               onUnarchive={handleUnarchive}
+              githubUsername={githubUsername}
             />
           ))}
         </div>
       )}
 
       {showSettings && (
-        <div className="modal-backdrop" onClick={() => setShowSettings(false)}>
+        <div className="modal-backdrop" onClick={() => { setShowSettings(false); loadGithubUsername(); }}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Settings</h2>
-              <button className="btn-icon" onClick={() => setShowSettings(false)}>&times;</button>
+              <button className="btn-icon" onClick={() => { setShowSettings(false); loadGithubUsername(); }}>&times;</button>
             </div>
             <Settings />
           </div>
