@@ -92,6 +92,11 @@ impl PollingManager {
 
         let opencode_statuses = Self::get_opencode_context(db).await;
 
+        let github_repo_enabled = db
+            .get_all_settings()
+            .map(|s| s.github_repo_enabled)
+            .unwrap_or(false);
+
         for item in items {
             // Skip terminal items, but keep polling opencode_session and copilot_agent
             // (archived sessions need status tracking, idle sessions may become busy).
@@ -112,6 +117,9 @@ impl PollingManager {
                 continue;
             }
             if item.item_type == "github_repo" && item.status == "archived" {
+                continue;
+            }
+            if item.item_type == "github_repo" && !github_repo_enabled {
                 continue;
             }
 

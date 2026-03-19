@@ -13,6 +13,7 @@ export function Dashboard() {
   const [filter, setFilter] = useState<Item['type'] | 'all'>('all');
   const [showArchived, setShowArchived] = useState(false);
   const [githubUsername, setGithubUsername] = useState('');
+  const [githubRepoEnabled, setGithubRepoEnabled] = useState(false);
 
   useEffect(() => {
     loadItems();
@@ -56,8 +57,9 @@ export function Dashboard() {
     try {
       const settings: SettingsType = await invoke('get_settings');
       setGithubUsername(settings.github_username || '');
+      setGithubRepoEnabled(settings.github_repo_enabled ?? false);
     } catch (error) {
-      console.error('Failed to load github username:', error);
+      console.error('Failed to load github settings:', error);
     }
   };
 
@@ -100,19 +102,23 @@ export function Dashboard() {
     }
   };
 
+  const visibleItems = githubRepoEnabled
+    ? items
+    : items.filter(i => i.type !== 'github_repo');
+
   const filteredItems = filter === 'all' 
-    ? items 
-    : items.filter(item => item.type === filter);
+    ? visibleItems 
+    : visibleItems.filter(item => item.type === filter);
 
   const typeCounts = {
-    all: items.length,
-    slack_thread: items.filter(i => i.type === 'slack_thread').length,
-    github_action: items.filter(i => i.type === 'github_action').length,
-    github_pr: items.filter(i => i.type === 'github_pr').length,
-    github_repo: items.filter(i => i.type === 'github_repo').length,
-    copilot_agent: items.filter(i => i.type === 'copilot_agent').length,
-    cli_session: items.filter(i => i.type === 'cli_session').length,
-    opencode_session: items.filter(i => i.type === 'opencode_session').length,
+    all: visibleItems.length,
+    slack_thread: visibleItems.filter(i => i.type === 'slack_thread').length,
+    github_action: visibleItems.filter(i => i.type === 'github_action').length,
+    github_pr: visibleItems.filter(i => i.type === 'github_pr').length,
+    github_repo: visibleItems.filter(i => i.type === 'github_repo').length,
+    copilot_agent: visibleItems.filter(i => i.type === 'copilot_agent').length,
+    cli_session: visibleItems.filter(i => i.type === 'cli_session').length,
+    opencode_session: visibleItems.filter(i => i.type === 'opencode_session').length,
   };
 
   return (

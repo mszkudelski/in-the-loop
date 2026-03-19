@@ -164,6 +164,14 @@ pub fn rebuild_tray_menu(app_handle: &AppHandle, items: &[Item]) {
 /// Refresh tray badge and menu from a single data snapshot to avoid race conditions.
 pub fn refresh_tray(app_handle: &AppHandle, db: &Arc<Database>) {
     let items = db.get_visible_items().unwrap_or_default();
+    let github_repo_enabled = db
+        .get_all_settings()
+        .map(|s| s.github_repo_enabled)
+        .unwrap_or(false);
+    let items: Vec<_> = items
+        .into_iter()
+        .filter(|i| github_repo_enabled || i.item_type != "github_repo")
+        .collect();
     let actionable_count = items
         .iter()
         .filter(|i| {
