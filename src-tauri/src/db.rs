@@ -38,6 +38,7 @@ pub struct Settings {
     pub notify_session_ended: bool,
     pub notify_input_needed: bool,
     pub github_username: String,
+    pub github_repo_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -633,12 +634,18 @@ impl Database {
 
         let github_username = self.get_setting("github_username")?.unwrap_or_default();
 
+        let github_repo_enabled = self
+            .get_setting("github_repo_enabled")?
+            .map(|v| v == "true")
+            .unwrap_or(false);
+
         Ok(Settings {
             polling_interval,
             notify_session_started,
             notify_session_ended,
             notify_input_needed,
             github_username,
+            github_repo_enabled,
         })
     }
 
