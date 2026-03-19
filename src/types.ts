@@ -49,6 +49,7 @@ export interface Settings {
   notify_session_ended: boolean;
   notify_input_needed: boolean;
   github_username: string;
+  github_repo_enabled: boolean;
 }
 
 export interface AddItemRequest {
